@@ -21,7 +21,10 @@ const pool = new Pool({
   }
 });
 
+// =========================
 // DATABASE
+// =========================
+
 async function initDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -44,21 +47,87 @@ async function initDatabase() {
   `);
 
   await pool.query(`
+    ALTER TABLE conversations
+    ADD COLUMN IF NOT EXISTS type VARCHAR(20) DEFAULT 'private'
+  `);
+
+  await pool.query(`
+    ALTER TABLE conversations
+    ADD COLUMN IF NOT EXISTS name VARCHAR(100)
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS conversation_members (
+      conversation_id BIGINT
+        REFERENCES conversations(id) ON DELETE CASCADE,
+
+      user_id BIGINT
+        REFERENCES users(id) ON DELETE CASCADE,
+
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+      PRIMARY KEY (conversation_id, user_id)
+    )
+  `);
+
+  // Přidání členů ke starším 1:1 chatům
+  await pool.query(`
+    INSERT INTO conversation_members
+      (conversation_id, user_id)
+
+    SELECT id, user_one
+    FROM conversations
+    WHERE type = 'private'
+
+    ON CONFLICT DO NOTHING
+  `);
+
+  await pool.query(`
+    INSERT INTO conversation_members
+      (conversation_id, user_id)
+
+    SELECT id, user_two
+    FROM conversations
+    WHERE type = 'private'
+
+    ON CONFLICT DO NOTHING
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS messages (
       id BIGSERIAL PRIMARY KEY,
+
       conversation_id BIGINT NOT NULL
         REFERENCES conversations(id) ON DELETE CASCADE,
+
       sender_id BIGINT NOT NULL
         REFERENCES users(id) ON DELETE CASCADE,
+
       message TEXT NOT NULL,
+
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS
+    idx_conversation_members_user
+    ON conversation_members(user_id)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS
+    idx_messages_conversation
+    ON messages(conversation_id, created_at)
   `);
 
   console.log("PostgreSQL databáze připravena.");
 }
 
+// =========================
 // AUTH
+// =========================
+
 function authenticateToken(req, res, next) {
   const authHeader = req.headers.authorization;
 
@@ -80,7 +149,10 @@ function authenticateToken(req, res, next) {
   }
 }
 
+// =========================
 // TEST
+// =========================
+
 app.get("/", (req, res) => {
   res.json({
     app: "Rypenger",
@@ -89,7 +161,10 @@ app.get("/", (req, res) => {
   });
 });
 
+// =========================
 // REGISTRACE
+// =========================
+
 app.post("/register", async (req, res) => {
   try {
     const { username, email, password } = req.body;
@@ -127,7 +202,11 @@ app.post("/register", async (req, res) => {
     }
 
     const existingUsername = await pool.query(
-      "SELECT id FROM users WHERE LOWER(username) = LOWER($1)",
+      `
+      SELECT id
+      FROM users
+      WHERE LOWER(username) = LOWER($1)
+      `,
       [cleanUsername]
     );
 
@@ -146,7 +225,11 @@ app.post("/register", async (req, res) => {
       VALUES ($1, $2, $3)
       RETURNING id, username, email
       `,
-      [cleanUsername, normalizedEmail, passwordHash]
+      [
+        cleanUsername,
+        normalizedEmail,
+        passwordHash
+      ]
     );
 
     const user = result.rows[0];
@@ -181,7 +264,10 @@ app.post("/register", async (req, res) => {
   }
 });
 
+// =========================
 // LOGIN
+// =========================
+
 app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -252,7 +338,10 @@ app.post("/login", async (req, res) => {
   }
 });
 
+// =========================
 // PROFIL
+// =========================
+
 app.get("/me", authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
@@ -289,53 +378,63 @@ app.get("/me", authenticateToken, async (req, res) => {
   }
 });
 
+// =========================
 // VYHLEDÁNÍ UŽIVATELŮ
-app.get("/users/search", authenticateToken, async (req, res) => {
-  try {
-    const q = (req.query.q || "").trim();
+// =========================
 
-    if (q.length < 2) {
-      return res.json({
-        users: []
+app.get(
+  "/users/search",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const q = (req.query.q || "").trim();
+
+      if (q.length < 2) {
+        return res.json({
+          users: []
+        });
+      }
+
+      const result = await pool.query(
+        `
+        SELECT id, username, email
+        FROM users
+        WHERE id != $1
+        AND (
+          LOWER(username) LIKE LOWER($2)
+          OR LOWER(email) LIKE LOWER($2)
+        )
+        ORDER BY username
+        LIMIT 20
+        `,
+        [
+          req.user.id,
+          `%${q}%`
+        ]
+      );
+
+      res.json({
+        users: result.rows.map(user => ({
+          id: user.id.toString(),
+          username: user.username,
+          email: user.email
+        }))
+      });
+
+    } catch (error) {
+      console.error("USER SEARCH ERROR:", error);
+
+      res.status(500).json({
+        error: "Chyba při hledání uživatelů."
       });
     }
-
-    const result = await pool.query(
-      `
-      SELECT id, username, email
-      FROM users
-      WHERE id != $1
-      AND (
-        LOWER(username) LIKE LOWER($2)
-        OR LOWER(email) LIKE LOWER($2)
-      )
-      ORDER BY username
-      LIMIT 20
-      `,
-      [
-        req.user.id,
-        `%${q}%`
-      ]
-    );
-
-    res.json({
-      users: result.rows.map(user => ({
-        id: user.id.toString(),
-        username: user.username,
-        email: user.email
-      }))
-    });
-
-  } catch (error) {
-    console.error("USER SEARCH ERROR:", error);
-
-    res.status(500).json({
-      error: "Chyba při hledání uživatelů."
-    });
   }
-});
+);
 
-// VYTVOŘENÍ / NALEZENÍ 1:1 KONVERZACE
+// =========================
+// VYTVOŘENÍ / NALEZENÍ 1:1
+// =========================
+
 app.post(
   "/conversations",
   authenticateToken,
@@ -356,7 +455,11 @@ app.post(
       }
 
       const otherUser = await pool.query(
-        "SELECT id, username, email FROM users WHERE id = $1",
+        `
+        SELECT id, username, email
+        FROM users
+        WHERE id = $1
+        `,
         [otherUserId]
       );
 
@@ -394,8 +497,8 @@ app.post(
         const created = await pool.query(
           `
           INSERT INTO conversations
-          (user_one, user_two)
-          VALUES ($1, $2)
+          (user_one, user_two, type)
+          VALUES ($1, $2, 'private')
           RETURNING id
           `,
           [firstId, secondId]
@@ -404,9 +507,24 @@ app.post(
         conversationId = created.rows[0].id;
       }
 
+      await pool.query(
+        `
+        INSERT INTO conversation_members
+        (conversation_id, user_id)
+        VALUES ($1, $2), ($1, $3)
+        ON CONFLICT DO NOTHING
+        `,
+        [
+          conversationId,
+          firstId,
+          secondId
+        ]
+      );
+
       res.json({
         conversation: {
           id: conversationId.toString(),
+          type: "private",
           user: {
             id: otherUser.rows[0].id.toString(),
             username: otherUser.rows[0].username,
@@ -425,7 +543,142 @@ app.post(
   }
 );
 
+// =========================
+// VYTVOŘENÍ SKUPINY
+// =========================
+
+app.post(
+  "/groups",
+  authenticateToken,
+  async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+      const name = (req.body.name || "").trim();
+      const memberIds = Array.isArray(req.body.memberIds)
+        ? req.body.memberIds
+        : [];
+
+      if (!name) {
+        return res.status(400).json({
+          error: "Zadej název skupiny."
+        });
+      }
+
+      if (name.length > 100) {
+        return res.status(400).json({
+          error: "Název skupiny je příliš dlouhý."
+        });
+      }
+
+      const allMemberIds = [
+        Number(req.user.id),
+        ...memberIds
+          .map(Number)
+          .filter(id => id && id !== Number(req.user.id))
+      ];
+
+      const uniqueMemberIds = [
+        ...new Set(allMemberIds)
+      ];
+
+      if (uniqueMemberIds.length < 2) {
+        return res.status(400).json({
+          error: "Skupina musí mít alespoň 2 členy."
+        });
+      }
+
+      const usersResult = await pool.query(
+        `
+        SELECT id, username, email
+        FROM users
+        WHERE id = ANY($1::bigint[])
+        `,
+        [uniqueMemberIds]
+      );
+
+      if (
+        usersResult.rows.length !==
+        uniqueMemberIds.length
+      ) {
+        return res.status(400).json({
+          error: "Některý z vybraných uživatelů neexistuje."
+        });
+      }
+
+      await client.query("BEGIN");
+
+      // Pro skupinu používáme user_one = zakladatel
+      // a user_two = zakladatel, protože členové
+      // jsou uloženi v conversation_members.
+      const conversationResult = await client.query(
+        `
+        INSERT INTO conversations
+        (user_one, user_two, type, name)
+        VALUES ($1, $1, 'group', $2)
+        RETURNING id, name
+        `,
+        [
+          req.user.id,
+          name
+        ]
+      );
+
+      const conversation =
+        conversationResult.rows[0];
+
+      for (const memberId of uniqueMemberIds) {
+        await client.query(
+          `
+          INSERT INTO conversation_members
+          (conversation_id, user_id)
+          VALUES ($1, $2)
+          ON CONFLICT DO NOTHING
+          `,
+          [
+            conversation.id,
+            memberId
+          ]
+        );
+      }
+
+      await client.query("COMMIT");
+
+      res.status(201).json({
+        conversation: {
+          id: conversation.id.toString(),
+          type: "group",
+          name: conversation.name,
+          members: usersResult.rows.map(user => ({
+            id: user.id.toString(),
+            username: user.username,
+            email: user.email
+          }))
+        }
+      });
+
+    } catch (error) {
+      await client.query("ROLLBACK");
+
+      console.error(
+        "CREATE GROUP ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        error: "Chyba při vytváření skupiny."
+      });
+
+    } finally {
+      client.release();
+    }
+  }
+);
+
+// =========================
 // MOJE CHATY
+// =========================
+
 app.get(
   "/conversations",
   authenticateToken,
@@ -435,19 +688,44 @@ app.get(
         `
         SELECT
           c.id,
+          c.type,
+          c.name,
+
           CASE
-            WHEN c.user_one = $1 THEN u2.id
-            ELSE u1.id
+            WHEN c.type = 'private'
+            THEN
+              CASE
+                WHEN c.user_one = $1
+                THEN u2.id
+                ELSE u1.id
+              END
+            ELSE NULL
           END AS other_id,
+
           CASE
-            WHEN c.user_one = $1 THEN u2.username
-            ELSE u1.username
+            WHEN c.type = 'private'
+            THEN
+              CASE
+                WHEN c.user_one = $1
+                THEN u2.username
+                ELSE u1.username
+              END
+            ELSE NULL
           END AS other_username
+
         FROM conversations c
-        JOIN users u1 ON u1.id = c.user_one
-        JOIN users u2 ON u2.id = c.user_two
-        WHERE c.user_one = $1
-        OR c.user_two = $1
+
+        JOIN conversation_members cm
+          ON cm.conversation_id = c.id
+
+        LEFT JOIN users u1
+          ON u1.id = c.user_one
+
+        LEFT JOIN users u2
+          ON u2.id = c.user_two
+
+        WHERE cm.user_id = $1
+
         ORDER BY c.created_at DESC
         `,
         [req.user.id]
@@ -456,15 +734,24 @@ app.get(
       res.json({
         conversations: result.rows.map(chat => ({
           id: chat.id.toString(),
-          user: {
-            id: chat.other_id.toString(),
-            username: chat.other_username
-          }
+          type: chat.type,
+          name: chat.name,
+
+          user:
+            chat.type === "private"
+              ? {
+                  id: chat.other_id.toString(),
+                  username: chat.other_username
+                }
+              : null
         }))
       });
 
     } catch (error) {
-      console.error("CONVERSATIONS ERROR:", error);
+      console.error(
+        "CONVERSATIONS ERROR:",
+        error
+      );
 
       res.status(500).json({
         error: "Chyba při načítání chatů."
@@ -473,7 +760,85 @@ app.get(
   }
 );
 
+// =========================
+// DETAIL SKUPINY
+// =========================
+
+app.get(
+  "/groups/:groupId",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const groupId = Number(
+        req.params.groupId
+      );
+
+      const access = await pool.query(
+        `
+        SELECT c.id, c.name, c.type
+        FROM conversations c
+        JOIN conversation_members cm
+          ON cm.conversation_id = c.id
+        WHERE c.id = $1
+        AND cm.user_id = $2
+        AND c.type = 'group'
+        `,
+        [
+          groupId,
+          req.user.id
+        ]
+      );
+
+      if (access.rows.length === 0) {
+        return res.status(403).json({
+          error: "K této skupině nemáš přístup."
+        });
+      }
+
+      const members = await pool.query(
+        `
+        SELECT
+          u.id,
+          u.username,
+          u.email
+        FROM conversation_members cm
+        JOIN users u
+          ON u.id = cm.user_id
+        WHERE cm.conversation_id = $1
+        ORDER BY u.username
+        `,
+        [groupId]
+      );
+
+      res.json({
+        group: {
+          id: access.rows[0].id.toString(),
+          name: access.rows[0].name,
+          members: members.rows.map(user => ({
+            id: user.id.toString(),
+            username: user.username,
+            email: user.email
+          }))
+        }
+      });
+
+    } catch (error) {
+      console.error(
+        "GROUP DETAIL ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        error: "Chyba při načítání skupiny."
+      });
+    }
+  }
+);
+
+// =========================
 // ODESLÁNÍ ZPRÁVY
+// =========================
+
 app.post(
   "/conversations/:conversationId/messages",
   authenticateToken,
@@ -483,7 +848,8 @@ app.post(
         req.params.conversationId
       );
 
-      const message = (req.body.message || "").trim();
+      const message =
+        (req.body.message || "").trim();
 
       if (!message) {
         return res.status(400).json({
@@ -493,15 +859,17 @@ app.post(
 
       const access = await pool.query(
         `
-        SELECT id
-        FROM conversations
-        WHERE id = $1
-        AND (
-          user_one = $2
-          OR user_two = $2
-        )
+        SELECT c.id
+        FROM conversations c
+        JOIN conversation_members cm
+          ON cm.conversation_id = c.id
+        WHERE c.id = $1
+        AND cm.user_id = $2
         `,
-        [conversationId, req.user.id]
+        [
+          conversationId,
+          req.user.id
+        ]
       );
 
       if (access.rows.length === 0) {
@@ -515,7 +883,11 @@ app.post(
         INSERT INTO messages
         (conversation_id, sender_id, message)
         VALUES ($1, $2, $3)
-        RETURNING id, sender_id, message, created_at
+        RETURNING
+          id,
+          sender_id,
+          message,
+          created_at
         `,
         [
           conversationId,
@@ -529,14 +901,18 @@ app.post(
       res.status(201).json({
         message: {
           id: newMessage.id.toString(),
-          senderId: newMessage.sender_id.toString(),
+          senderId:
+            newMessage.sender_id.toString(),
           message: newMessage.message,
           createdAt: newMessage.created_at
         }
       });
 
     } catch (error) {
-      console.error("SEND MESSAGE ERROR:", error);
+      console.error(
+        "SEND MESSAGE ERROR:",
+        error
+      );
 
       res.status(500).json({
         error: "Chyba při odesílání zprávy."
@@ -545,7 +921,10 @@ app.post(
   }
 );
 
+// =========================
 // NAČTENÍ ZPRÁV
+// =========================
+
 app.get(
   "/conversations/:conversationId/messages",
   authenticateToken,
@@ -557,15 +936,17 @@ app.get(
 
       const access = await pool.query(
         `
-        SELECT id
-        FROM conversations
-        WHERE id = $1
-        AND (
-          user_one = $2
-          OR user_two = $2
-        )
+        SELECT c.id
+        FROM conversations c
+        JOIN conversation_members cm
+          ON cm.conversation_id = c.id
+        WHERE c.id = $1
+        AND cm.user_id = $2
         `,
-        [conversationId, req.user.id]
+        [
+          conversationId,
+          req.user.id
+        ]
       );
 
       if (access.rows.length === 0) {
@@ -591,14 +972,18 @@ app.get(
       res.json({
         messages: result.rows.map(msg => ({
           id: msg.id.toString(),
-          senderId: msg.sender_id.toString(),
+          senderId:
+            msg.sender_id.toString(),
           message: msg.message,
           createdAt: msg.created_at
         }))
       });
 
     } catch (error) {
-      console.error("GET MESSAGES ERROR:", error);
+      console.error(
+        "GET MESSAGES ERROR:",
+        error
+      );
 
       res.status(500).json({
         error: "Chyba při načítání zpráv."
@@ -607,7 +992,10 @@ app.get(
   }
 );
 
-// START
+// =========================
+// START SERVERU
+// =========================
+
 async function startServer() {
   try {
     await initDatabase();
