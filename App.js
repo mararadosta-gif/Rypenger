@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   SafeAreaView,
   View,
@@ -9,8 +9,10 @@ import {
   StatusBar,
   Alert,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const API_URL = "https://rypenger.onrender.com";
+const TOKEN_KEY = "@rypenger_token";
 
 export default function App() {
   const [screen, setScreen] = useState("welcome");
@@ -20,8 +22,45 @@ export default function App() {
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
+  const [checkingLogin, setCheckingLogin] = useState(true);
   const [user, setUser] = useState(null);
 
+  // AUTOMATICKÉ PŘIHLÁŠENÍ
+  useEffect(() => {
+    checkSavedLogin();
+  }, []);
+
+  const checkSavedLogin = async () => {
+    try {
+      const token = await AsyncStorage.getItem(TOKEN_KEY);
+
+      if (!token) {
+        setCheckingLogin(false);
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.user) {
+        setUser(data.user);
+        setScreen("chats");
+      } else {
+        await AsyncStorage.removeItem(TOKEN_KEY);
+      }
+    } catch (error) {
+      console.log("Kontrola přihlášení:", error);
+    } finally {
+      setCheckingLogin(false);
+    }
+  };
+
+  // REGISTRACE
   const register = async () => {
     if (!username || !email || !password) {
       Alert.alert("Chyba", "Vyplň všechna pole.");
@@ -46,9 +85,17 @@ export default function App() {
       const data = await response.json();
 
       if (!response.ok) {
-        Alert.alert("Registrace", data.error || "Registrace se nepodařila.");
+        Alert.alert(
+          "Registrace",
+          data.error || "Registrace se nepodařila."
+        );
         return;
       }
+
+      await AsyncStorage.setItem(
+        TOKEN_KEY,
+        data.token
+      );
 
       setUser(data.user);
       setUsername("");
@@ -67,6 +114,7 @@ export default function App() {
     }
   };
 
+  // PŘIHLÁŠENÍ
   const login = async () => {
     if (!email || !password) {
       Alert.alert("Chyba", "Zadej e-mail a heslo.");
@@ -90,9 +138,17 @@ export default function App() {
       const data = await response.json();
 
       if (!response.ok) {
-        Alert.alert("Přihlášení", data.error || "Přihlášení se nepodařilo.");
+        Alert.alert(
+          "Přihlášení",
+          data.error || "Přihlášení se nepodařilo."
+        );
         return;
       }
+
+      await AsyncStorage.setItem(
+        TOKEN_KEY,
+        data.token
+      );
 
       setUser(data.user);
       setEmail("");
@@ -108,15 +164,37 @@ export default function App() {
     }
   };
 
-  const logout = () => {
+  // ODHLÁŠENÍ
+  const logout = async () => {
+    await AsyncStorage.removeItem(TOKEN_KEY);
+
     setUser(null);
+    setEmail("");
+    setPassword("");
     setScreen("welcome");
   };
+
+  // NAČÍTÁNÍ
+  if (checkingLogin) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+
+        <View style={styles.center}>
+          <Text style={styles.logo}>RYPENGER</Text>
+          <Text style={styles.loadingText}>
+            Přihlašuji...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
 
+      {/* WELCOME */}
       {screen === "welcome" && (
         <View style={styles.center}>
           <Text style={styles.logo}>RYPENGER</Text>
@@ -129,7 +207,9 @@ export default function App() {
             style={styles.button}
             onPress={() => setScreen("login")}
           >
-            <Text style={styles.buttonText}>Přihlásit se</Text>
+            <Text style={styles.buttonText}>
+              Přihlásit se
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -143,9 +223,12 @@ export default function App() {
         </View>
       )}
 
+      {/* LOGIN */}
       {screen === "login" && (
         <View style={styles.form}>
-          <Text style={styles.title}>Přihlášení</Text>
+          <Text style={styles.title}>
+            Přihlášení
+          </Text>
 
           <TextInput
             style={styles.input}
@@ -172,19 +255,28 @@ export default function App() {
             disabled={loading}
           >
             <Text style={styles.buttonText}>
-              {loading ? "Přihlašuji..." : "Přihlásit"}
+              {loading
+                ? "Přihlašuji..."
+                : "Přihlásit"}
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => setScreen("welcome")}>
-            <Text style={styles.back}>← Zpět</Text>
+          <TouchableOpacity
+            onPress={() => setScreen("welcome")}
+          >
+            <Text style={styles.back}>
+              ← Zpět
+            </Text>
           </TouchableOpacity>
         </View>
       )}
 
+      {/* REGISTER */}
       {screen === "register" && (
         <View style={styles.form}>
-          <Text style={styles.title}>Vytvoření účtu</Text>
+          <Text style={styles.title}>
+            Vytvoření účtu
+          </Text>
 
           <TextInput
             style={styles.input}
@@ -220,19 +312,28 @@ export default function App() {
             disabled={loading}
           >
             <Text style={styles.buttonText}>
-              {loading ? "Vytvářím účet..." : "Registrovat"}
+              {loading
+                ? "Vytvářím účet..."
+                : "Registrovat"}
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => setScreen("welcome")}>
-            <Text style={styles.back}>← Zpět</Text>
+          <TouchableOpacity
+            onPress={() => setScreen("welcome")}
+          >
+            <Text style={styles.back}>
+              ← Zpět
+            </Text>
           </TouchableOpacity>
         </View>
       )}
 
+      {/* CHATS */}
       {screen === "chats" && (
         <View style={styles.chats}>
-          <Text style={styles.title}>Rypenger</Text>
+          <Text style={styles.title}>
+            Rypenger
+          </Text>
 
           {user && (
             <Text style={styles.loggedUser}>
@@ -249,7 +350,9 @@ export default function App() {
               Tady se později objeví tvoje konverzace.
             </Text>
 
-            <TouchableOpacity style={styles.button}>
+            <TouchableOpacity
+              style={styles.button}
+            >
               <Text style={styles.buttonText}>
                 + Nový chat
               </Text>
@@ -293,6 +396,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 12,
     marginBottom: 35,
+  },
+
+  loadingText: {
+    color: "#8997a8",
+    fontSize: 16,
+    marginTop: 15,
   },
 
   form: {
