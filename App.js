@@ -13,12 +13,18 @@ import {
   Platform,
   Modal,
 } from "react-native";
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const API_URL = "https://rypenger.onrender.com";
 const TOKEN_KEY = "@rypenger_token";
 
-export default function App() {
+function AppContent() {
+  const insets = useSafeAreaInsets();
+
   const [screen, setScreen] = useState("welcome");
 
   const [token, setToken] = useState(null);
@@ -1298,11 +1304,16 @@ export default function App() {
   const renderChat = () => (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={styles.chatKeyboard}
         behavior={
           Platform.OS === "ios"
             ? "padding"
-            : undefined
+            : "height"
+        }
+        keyboardVerticalOffset={
+          Platform.OS === "android"
+            ? 0
+            : 0
         }
       >
         <View style={styles.chatHeader}>
@@ -1391,6 +1402,7 @@ export default function App() {
         </View>
 
         <FlatList
+          style={styles.messagesList}
           data={messages}
           keyExtractor={(item, index) =>
             String(
@@ -1482,7 +1494,15 @@ export default function App() {
           }}
         />
 
-        <View style={styles.inputBar}>
+        <View
+          style={[
+            styles.inputBar,
+            {
+              paddingBottom:
+                Math.max(insets.bottom, 8),
+            },
+          ]}
+        >
           <TextInput
             style={styles.messageInput}
             placeholder="Napiš zprávu..."
@@ -1724,6 +1744,14 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: "#050505",
+  },
+
+  chatKeyboard: {
+    flex: 1,
+  },
+
+  messagesList: {
+    flex: 1,
   },
 
   center: {
@@ -2034,7 +2062,8 @@ const styles = StyleSheet.create({
   inputBar: {
     flexDirection: "row",
     alignItems: "flex-end",
-    padding: 8,
+    paddingTop: 8,
+    paddingHorizontal: 8,
     backgroundColor: "#0b0b0b",
     borderTopWidth: 1,
     borderTopColor: "#202020",
@@ -2111,3 +2140,11 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
 });
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
+  );
+}
