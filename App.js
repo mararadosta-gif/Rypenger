@@ -12,12 +12,15 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  Image,
+  Keyboard,
 } from "react-native";
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
 
 const API_URL = "https://rypenger.onrender.com";
 const TOKEN_KEY = "@rypenger_token";
@@ -53,6 +56,9 @@ function AppContent() {
   const [membersVisible, setMembersVisible] = useState(false);
   const [renameVisible, setRenameVisible] = useState(false);
   const [renameText, setRenameText] = useState("");
+
+  const [profileVisible, setProfileVisible] = useState(false);
+  const [imageSending, setImageSending] = useState(false);
 
   // ==================================================
   // API
@@ -134,7 +140,10 @@ function AppContent() {
 
       loadConversations(savedToken);
     } catch (error) {
-      console.log("Kontrola přihlášení:", error);
+      console.log(
+        "Kontrola přihlášení:",
+        error
+      );
       setScreen("welcome");
     }
   };
@@ -267,6 +276,169 @@ function AppContent() {
   };
 
   // ==================================================
+  // PROFILOVKA
+  // ==================================================
+
+  const updateAvatar = async (
+    useCamera = false
+  ) => {
+    try {
+      let permission;
+
+      if (useCamera) {
+        permission =
+          await ImagePicker.requestCameraPermissionsAsync();
+      } else {
+        permission =
+          await ImagePicker.requestMediaLibraryPermissionsAsync();
+      }
+
+      if (!permission.granted) {
+        Alert.alert(
+          "Rypenger",
+          useCamera
+            ? "Rypenger potřebuje přístup k foťáku."
+            : "Rypenger potřebuje přístup k fotkám."
+        );
+        return;
+      }
+
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync({
+            mediaTypes: ["images"],
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.7,
+            base64: true,
+          })
+        : await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ["images"],
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.7,
+            base64: true,
+          });
+
+      if (
+        result.canceled ||
+        !result.assets?.[0]
+      ) {
+        return;
+      }
+
+      const asset =
+        result.assets[0];
+
+      if (!asset.base64) {
+        Alert.alert(
+          "Rypenger",
+          "Fotku se nepodařilo načíst."
+        );
+        return;
+      }
+
+      const mime =
+        asset.mimeType ||
+        "image/jpeg";
+
+      const avatar =
+        `data:${mime};base64,${asset.base64}`;
+
+      setLoading(true);
+
+      const data = await api(
+        "/me/avatar",
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            avatar,
+          }),
+        }
+      );
+
+      if (data.user) {
+        setMe(data.user);
+      }
+
+      Alert.alert(
+        "Hotovo",
+        "Profilová fotka byla změněna."
+      );
+    } catch (error) {
+      Alert.alert(
+        "Profilová fotka",
+        error.message
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const removeAvatar = async () => {
+    try {
+      setLoading(true);
+
+      const data = await api(
+        "/me/avatar",
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            avatar: null,
+          }),
+        }
+      );
+
+      if (data.user) {
+        setMe(data.user);
+      }
+
+      Alert.alert(
+        "Hotovo",
+        "Profilová fotka byla odstraněna."
+      );
+    } catch (error) {
+      Alert.alert(
+        "Profilová fotka",
+        error.message
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const showAvatarOptions = () => {
+    Alert.alert(
+      "Profilová fotka",
+      "Co chceš udělat?",
+      [
+        {
+          text: "Foťák",
+          onPress: () =>
+            updateAvatar(true),
+        },
+        {
+          text: "Galerie",
+          onPress: () =>
+            updateAvatar(false),
+        },
+        ...(me?.avatar
+          ? [
+              {
+                text: "Odstranit",
+                style: "destructive",
+                onPress: removeAvatar,
+              },
+            ]
+          : []),
+        {
+          text: "Zrušit",
+          style: "cancel",
+        },
+      ]
+    );
+  };
+
+  // ==================================================
   // CHATY
   // ==================================================
 
@@ -291,7 +463,8 @@ function AppContent() {
         }
       );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       if (response.ok) {
         setConversations(
@@ -310,7 +483,9 @@ function AppContent() {
   // OTEVŘENÍ CHATU
   // ==================================================
 
-  const openChat = async (chat) => {
+  const openChat = async (
+    chat
+  ) => {
     setCurrentChat(chat);
     setMessages([]);
     setGroupInfo(null);
@@ -338,7 +513,8 @@ function AppContent() {
         {
           method: "POST",
           body: JSON.stringify({
-            userId: selectedUser.id,
+            userId:
+              selectedUser.id,
           }),
         }
       );
@@ -368,7 +544,10 @@ function AppContent() {
       setGroupInfo(null);
       setScreen("chat");
 
-      await loadMessages(chat.id);
+      await loadMessages(
+        chat.id
+      );
+
       await loadConversations();
     } catch (error) {
       Alert.alert(
@@ -393,9 +572,10 @@ function AppContent() {
         setMessagesLoading(true);
       }
 
-      const data = await api(
-        `/conversations/${conversationId}/messages`
-      );
+      const data =
+        await api(
+          `/conversations/${conversationId}/messages`
+        );
 
       setMessages(
         data.messages || []
@@ -415,31 +595,58 @@ function AppContent() {
   };
 
   // ==================================================
-  // ODESLÁNÍ ZPRÁVY
+  // ODESLÁNÍ TEXTU
   // ==================================================
 
   const sendMessage = async () => {
     const text =
       messageText.trim();
 
-    if (!text || !currentChat) {
+    if (
+      !text ||
+      !currentChat
+    ) {
       return;
     }
 
     try {
       setMessageText("");
 
-      const data = await api(
-        `/conversations/${currentChat.id}/messages`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            message: text,
-          }),
-        }
+      const data =
+        await api(
+          `/conversations/${currentChat.id}/messages`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              message: text,
+            }),
+          }
+        );
+
+      addReturnedMessages(
+        data
       );
 
-      setMessages((oldMessages) => {
+      loadConversations();
+    } catch (error) {
+      setMessageText(text);
+
+      Alert.alert(
+        "Zpráva",
+        error.message
+      );
+    }
+  };
+
+  // ==================================================
+  // SPOLEČNÉ PŘIDÁNÍ ZPRÁV
+  // ==================================================
+
+  const addReturnedMessages = (
+    data
+  ) => {
+    setMessages(
+      (oldMessages) => {
         const newMessages = [
           ...oldMessages,
         ];
@@ -449,7 +656,9 @@ function AppContent() {
             newMessages.some(
               (item) =>
                 String(item.id) ===
-                String(data.message.id)
+                String(
+                  data.message.id
+                )
             );
 
           if (!exists) {
@@ -464,7 +673,9 @@ function AppContent() {
             newMessages.some(
               (item) =>
                 String(item.id) ===
-                String(data.rypMessage.id)
+                String(
+                  data.rypMessage.id
+                )
             );
 
           if (!exists) {
@@ -475,39 +686,162 @@ function AppContent() {
         }
 
         return newMessages;
-      });
-
-      loadConversations();
-    } catch (error) {
-      setMessageText(text);
-
-      Alert.alert(
-        "Zpráva",
-        error.message
-      );
-    }
+      }
+    );
   };
 
   // ==================================================
-  // VYHLEDÁVÁNÍ UŽIVATELŮ
+  // POSLÁNÍ FOTKY
   // ==================================================
 
-  const searchUsers = async (text) => {
+  const sendPhoto = async (
+    useCamera = false
+  ) => {
+    if (!currentChat) {
+      return;
+    }
+
+    try {
+      let permission;
+
+      if (useCamera) {
+        permission =
+          await ImagePicker.requestCameraPermissionsAsync();
+      } else {
+        permission =
+          await ImagePicker.requestMediaLibraryPermissionsAsync();
+      }
+
+      if (!permission.granted) {
+        Alert.alert(
+          "Rypenger",
+          useCamera
+            ? "Rypenger potřebuje přístup k foťáku."
+            : "Rypenger potřebuje přístup k fotkám."
+        );
+        return;
+      }
+
+      Keyboard.dismiss();
+
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync({
+            mediaTypes: ["images"],
+            allowsEditing: true,
+            quality: 0.7,
+            base64: true,
+          })
+        : await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ["images"],
+            allowsEditing: true,
+            quality: 0.7,
+            base64: true,
+          });
+
+      if (
+        result.canceled ||
+        !result.assets?.[0]
+      ) {
+        return;
+      }
+
+      const asset =
+        result.assets[0];
+
+      if (!asset.base64) {
+        Alert.alert(
+          "Fotka",
+          "Fotku se nepodařilo načíst."
+        );
+        return;
+      }
+
+      const mime =
+        asset.mimeType ||
+        "image/jpeg";
+
+      const image =
+        `data:${mime};base64,${asset.base64}`;
+
+      setImageSending(true);
+
+      const data =
+        await api(
+          `/conversations/${currentChat.id}/messages`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              message: "",
+              image,
+            }),
+          }
+        );
+
+      addReturnedMessages(
+        data
+      );
+
+      loadConversations();
+    } catch (error) {
+      Alert.alert(
+        "Fotka",
+        error.message
+      );
+    } finally {
+      setImageSending(false);
+    }
+  };
+
+  const showPhotoOptions = () => {
+    Alert.alert(
+      "Poslat fotku",
+      "Odkud ji chceš vybrat?",
+      [
+        {
+          text: "📷 Foťák",
+          onPress: () =>
+            sendPhoto(true),
+        },
+        {
+          text: "🖼️ Galerie",
+          onPress: () =>
+            sendPhoto(false),
+        },
+        {
+          text: "Zrušit",
+          style: "cancel",
+        },
+      ]
+    );
+  };
+
+  // ==================================================
+  // VYHLEDÁVÁNÍ
+  // ==================================================
+
+  const searchUsers = async (
+    text
+  ) => {
     setSearchText(text);
 
-    if (text.trim().length < 2) {
+    if (
+      text.trim().length < 2
+    ) {
       setUsers([]);
       return;
     }
 
     try {
-      const data = await api(
-        `/users/search?q=${encodeURIComponent(
-          text.trim()
-        )}`
-      );
+      const data =
+        await api(
+          `/users/search?q=${encodeURIComponent(
+            text.trim()
+          )}`
+        );
 
-      setUsers(data.users || []);
+      setUsers(
+        data.users || []
+      );
     } catch (error) {
       console.log(
         "Hledání uživatelů:",
@@ -523,27 +857,33 @@ function AppContent() {
   const toggleUserSelection = (
     selectedUser
   ) => {
-    setSelectedUsers((oldUsers) => {
-      const exists =
-        oldUsers.some(
-          (item) =>
-            String(item.id) ===
-            String(selectedUser.id)
-        );
+    setSelectedUsers(
+      (oldUsers) => {
+        const exists =
+          oldUsers.some(
+            (item) =>
+              String(item.id) ===
+              String(
+                selectedUser.id
+              )
+          );
 
-      if (exists) {
-        return oldUsers.filter(
-          (item) =>
-            String(item.id) !==
-            String(selectedUser.id)
-        );
+        if (exists) {
+          return oldUsers.filter(
+            (item) =>
+              String(item.id) !==
+              String(
+                selectedUser.id
+              )
+          );
+        }
+
+        return [
+          ...oldUsers,
+          selectedUser,
+        ];
       }
-
-      return [
-        ...oldUsers,
-        selectedUser,
-      ];
-    });
+    );
   };
 
   const createGroup = async () => {
@@ -571,19 +911,21 @@ function AppContent() {
     try {
       setLoading(true);
 
-      const data = await api(
-        "/groups",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            name,
-            memberIds:
-              selectedUsers.map(
-                (item) => item.id
-              ),
-          }),
-        }
-      );
+      const data =
+        await api(
+          "/groups",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              name,
+              memberIds:
+                selectedUsers.map(
+                  (item) =>
+                    item.id
+                ),
+            }),
+          }
+        );
 
       const group =
         data.group ||
@@ -599,7 +941,8 @@ function AppContent() {
         id: group.id,
         type: "group",
         name:
-          group.name || name,
+          group.name ||
+          name,
         members:
           group.members || [],
       };
@@ -614,8 +957,12 @@ function AppContent() {
       setScreen("chat");
 
       await loadConversations();
-      await loadMessages(chat.id);
-      await loadGroupInfo(chat.id);
+      await loadMessages(
+        chat.id
+      );
+      await loadGroupInfo(
+        chat.id
+      );
     } catch (error) {
       Alert.alert(
         "Skupina",
@@ -627,7 +974,7 @@ function AppContent() {
   };
 
   // ==================================================
-  // INFORMACE O SKUPINĚ
+  // INFO SKUPINY
   // ==================================================
 
   const loadGroupInfo = async (
@@ -635,9 +982,10 @@ function AppContent() {
     silent = false
   ) => {
     try {
-      const data = await api(
-        `/groups/${groupId}`
-      );
+      const data =
+        await api(
+          `/groups/${groupId}`
+        );
 
       setGroupInfo(
         data.group || data
@@ -653,7 +1001,7 @@ function AppContent() {
   };
 
   // ==================================================
-  // PŘEJMENOVÁNÍ SKUPINY
+  // PŘEJMENOVÁNÍ
   // ==================================================
 
   const renameGroup = async () => {
@@ -671,33 +1019,37 @@ function AppContent() {
     if (!currentChat) return;
 
     try {
-      const data = await api(
-        `/groups/${currentChat.id}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            name,
-          }),
-        }
-      );
+      const data =
+        await api(
+          `/groups/${currentChat.id}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              name,
+            }),
+          }
+        );
 
       const newName =
         data.group?.name ||
         data.name ||
         name;
 
-      setCurrentChat((old) => ({
-        ...old,
-        name: newName,
-      }));
+      setCurrentChat(
+        (old) => ({
+          ...old,
+          name: newName,
+        })
+      );
 
-      setGroupInfo((old) =>
-        old
-          ? {
-              ...old,
-              name: newName,
-            }
-          : old
+      setGroupInfo(
+        (old) =>
+          old
+            ? {
+                ...old,
+                name: newName,
+              }
+            : old
       );
 
       setRenameVisible(false);
@@ -713,7 +1065,7 @@ function AppContent() {
   };
 
   // ==================================================
-  // SMAZÁNÍ VLASTNÍ ZPRÁVY
+  // SMAZÁNÍ ZPRÁVY
   // ==================================================
 
   const deleteMessage = (
@@ -744,36 +1096,43 @@ function AppContent() {
         {
           text: "Smazat",
           style: "destructive",
-          onPress: async () => {
-            try {
-              await api(
-                `/messages/${message.id}`,
-                {
-                  method: "DELETE",
-                }
-              );
+          onPress:
+            async () => {
+              try {
+                await api(
+                  `/messages/${message.id}`,
+                  {
+                    method:
+                      "DELETE",
+                  }
+                );
 
-              setMessages((old) =>
-                old.filter(
-                  (item) =>
-                    String(item.id) !==
-                    String(message.id)
-                )
-              );
-            } catch (error) {
-              Alert.alert(
-                "Chyba",
-                error.message
-              );
-            }
-          },
+                setMessages(
+                  (old) =>
+                    old.filter(
+                      (item) =>
+                        String(
+                          item.id
+                        ) !==
+                        String(
+                          message.id
+                        )
+                    )
+                );
+              } catch (error) {
+                Alert.alert(
+                  "Chyba",
+                  error.message
+                );
+              }
+            },
         },
       ]
     );
   };
 
   // ==================================================
-  // AUTOMATICKÉ OBNOVOVÁNÍ
+  // AUTO OBNOVOVÁNÍ
   // ==================================================
 
   useEffect(() => {
@@ -813,11 +1172,62 @@ function AppContent() {
   ]);
 
   // ==================================================
+  // AVATAR COMPONENT
+  // ==================================================
+
+  const renderAvatar = (
+    avatar,
+    fallback = "👤",
+    size = 48
+  ) => {
+    if (avatar) {
+      return (
+        <Image
+          source={{
+            uri: avatar,
+          }}
+          style={[
+            styles.avatarImage,
+            {
+              width: size,
+              height: size,
+              borderRadius:
+                size / 2,
+            },
+          ]}
+        />
+      );
+    }
+
+    return (
+      <View
+        style={[
+          styles.chatAvatar,
+          {
+            width: size,
+            height: size,
+            borderRadius:
+              size / 2,
+          },
+        ]}
+      >
+        <Text
+          style={styles.avatarText}
+        >
+          {fallback}
+        </Text>
+      </View>
+    );
+  };
+
+  // ==================================================
   // WELCOME
   // ==================================================
 
   const renderWelcome = () => (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView
+      style={styles.safe}
+    >
       <View style={styles.center}>
         <Text style={styles.logo}>
           Rypenger
@@ -833,18 +1243,24 @@ function AppContent() {
             setScreen("login")
           }
         >
-          <Text style={styles.buttonText}>
+          <Text
+            style={styles.buttonText}
+          >
             Přihlásit se
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.secondaryButton}
+          style={
+            styles.secondaryButton
+          }
           onPress={() =>
             setScreen("register")
           }
         >
-          <Text style={styles.secondaryText}>
+          <Text
+            style={styles.secondaryText}
+          >
             Vytvořit účet
           </Text>
         </TouchableOpacity>
@@ -857,7 +1273,9 @@ function AppContent() {
   // ==================================================
 
   const renderLogin = () => (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView
+      style={styles.safe}
+    >
       <View style={styles.form}>
         <TouchableOpacity
           onPress={() =>
@@ -897,7 +1315,9 @@ function AppContent() {
           onPress={login}
           disabled={loading}
         >
-          <Text style={styles.buttonText}>
+          <Text
+            style={styles.buttonText}
+          >
             {loading
               ? "Přihlašuji..."
               : "Přihlásit"}
@@ -911,93 +1331,143 @@ function AppContent() {
   // REGISTER
   // ==================================================
 
-  const renderRegister = () => (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.form}>
-        <TouchableOpacity
-          onPress={() =>
-            setScreen("welcome")
-          }
-        >
-          <Text style={styles.back}>
-            ← Zpět
+  const renderRegister =
+    () => (
+      <SafeAreaView
+        style={styles.safe}
+      >
+        <View style={styles.form}>
+          <TouchableOpacity
+            onPress={() =>
+              setScreen("welcome")
+            }
+          >
+            <Text
+              style={styles.back}
+            >
+              ← Zpět
+            </Text>
+          </TouchableOpacity>
+
+          <Text
+            style={styles.title}
+          >
+            Vytvoření účtu
           </Text>
-        </TouchableOpacity>
 
-        <Text style={styles.title}>
-          Vytvoření účtu
-        </Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Uživatelské jméno"
+            placeholderTextColor="#777"
+            value={username}
+            onChangeText={
+              setUsername
+            }
+            autoCapitalize="none"
+          />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Uživatelské jméno"
-          placeholderTextColor="#777"
-          value={username}
-          onChangeText={setUsername}
-          autoCapitalize="none"
-        />
+          <TextInput
+            style={styles.input}
+            placeholder="E-mail"
+            placeholderTextColor="#777"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
 
-        <TextInput
-          style={styles.input}
-          placeholder="E-mail"
-          placeholderTextColor="#777"
-          value={email}
-          onChangeText={setEmail}
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
+          <TextInput
+            style={styles.input}
+            placeholder="Heslo"
+            placeholderTextColor="#777"
+            value={password}
+            onChangeText={
+              setPassword
+            }
+            secureTextEntry
+          />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Heslo"
-          placeholderTextColor="#777"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
-
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={register}
-          disabled={loading}
-        >
-          <Text style={styles.buttonText}>
-            {loading
-              ? "Vytvářím..."
-              : "Registrovat"}
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
-  );
+          <TouchableOpacity
+            style={
+              styles.primaryButton
+            }
+            onPress={register}
+            disabled={loading}
+          >
+            <Text
+              style={
+                styles.buttonText
+              }
+            >
+              {loading
+                ? "Vytvářím..."
+                : "Registrovat"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
 
   // ==================================================
   // SEZNAM CHATŮ
   // ==================================================
 
   const renderChats = () => (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView
+      style={styles.safe}
+    >
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>
-            Rypenger
-          </Text>
+        <TouchableOpacity
+          style={styles.headerProfile}
+          onPress={() =>
+            setProfileVisible(true)
+          }
+        >
+          {renderAvatar(
+            me?.avatar,
+            "👤",
+            48
+          )}
 
-          <Text style={styles.headerUser}>
-            @{me?.username || ""}
-          </Text>
-        </View>
+          <View
+            style={
+              styles.headerUserBox
+            }
+          >
+            <Text
+              style={
+                styles.headerTitle
+              }
+            >
+              Rypenger
+            </Text>
+
+            <Text
+              style={
+                styles.headerUser
+              }
+            >
+              @{me?.username || ""}
+            </Text>
+          </View>
+        </TouchableOpacity>
 
         <TouchableOpacity
           onPress={logout}
         >
-          <Text style={styles.headerAction}>
+          <Text
+            style={
+              styles.headerAction
+            }
+          >
             Odhlásit
           </Text>
         </TouchableOpacity>
       </View>
 
-      <View style={styles.topButtons}>
+      <View
+        style={styles.topButtons}
+      >
         <TouchableOpacity
           style={styles.topButton}
           onPress={() => {
@@ -1006,7 +1476,11 @@ function AppContent() {
             setScreen("newChat");
           }}
         >
-          <Text style={styles.topButtonText}>
+          <Text
+            style={
+              styles.topButtonText
+            }
+          >
             + Nový chat
           </Text>
         </TouchableOpacity>
@@ -1016,12 +1490,18 @@ function AppContent() {
           onPress={() => {
             setSearchText("");
             setUsers([]);
-            setSelectedUsers([]);
+            setSelectedUsers(
+              []
+            );
             setGroupName("");
             setScreen("newGroup");
           }}
         >
-          <Text style={styles.topButtonText}>
+          <Text
+            style={
+              styles.topButtonText
+            }
+          >
             + Skupina
           </Text>
         </TouchableOpacity>
@@ -1038,11 +1518,15 @@ function AppContent() {
             : styles.list
         }
         ListEmptyComponent={
-          <Text style={styles.emptyText}>
+          <Text
+            style={styles.emptyText}
+          >
             Zatím tu nejsou žádné chaty.
           </Text>
         }
-        renderItem={({ item }) => {
+        renderItem={({
+          item,
+        }) => {
           const isGroup =
             item.type === "group";
 
@@ -1050,43 +1534,67 @@ function AppContent() {
             isGroup
               ? item.name ||
                 "Skupina"
-              : item.user?.username ||
+              : item.user
+                  ?.username ||
                 item.username ||
                 "Uživatel";
 
           return (
             <TouchableOpacity
-              style={styles.chatItem}
+              style={
+                styles.chatItem
+              }
               onPress={() =>
                 openChat(item)
               }
             >
-              <View style={styles.chatAvatar}>
-                <Text style={styles.avatarText}>
-                  {isGroup
-                    ? "👥"
-                    : "👤"}
-                </Text>
-              </View>
+              {isGroup
+                ? renderAvatar(
+                    null,
+                    "👥",
+                    48
+                  )
+                : renderAvatar(
+                    item.user
+                      ?.avatar,
+                    "👤",
+                    48
+                  )}
 
-              <View style={styles.chatInfo}>
-                <Text style={styles.chatName}>
+              <View
+                style={
+                  styles.chatInfo
+                }
+              >
+                <Text
+                  style={
+                    styles.chatName
+                  }
+                >
                   {displayName}
                 </Text>
 
                 {isGroup ? (
-                  <Text style={styles.chatStatus}>
-                    Skupina
+                  <Text
+                    style={
+                      styles.chatStatus
+                    }
+                  >
+                    {item.lastImage
+                      ? "📷 Fotka"
+                      : "Skupina"}
                   </Text>
                 ) : (
                   <Text
                     style={[
                       styles.chatStatus,
-                      item.user?.online &&
+                      item.user
+                        ?.online &&
                         styles.onlineText,
                     ]}
                   >
-                    {item.user?.online
+                    {item.user
+                      ?.online
                       ? "● online"
                       : "● offline"}
                   </Text>
@@ -1096,6 +1604,120 @@ function AppContent() {
           );
         }}
       />
+
+      {/* PROFIL */}
+      <Modal
+        visible={profileVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() =>
+          setProfileVisible(false)
+        }
+      >
+        <View
+          style={
+            styles.modalBackground
+          }
+        >
+          <View
+            style={
+              styles.profileModal
+            }
+          >
+            <Text
+              style={
+                styles.modalTitle
+              }
+            >
+              Můj profil
+            </Text>
+
+            <TouchableOpacity
+              onPress={
+                showAvatarOptions
+              }
+              style={
+                styles.profileAvatarButton
+              }
+            >
+              {renderAvatar(
+                me?.avatar,
+                "👤",
+                110
+              )}
+
+              <View
+                style={
+                  styles.cameraBadge
+                }
+              >
+                <Text
+                  style={
+                    styles.cameraBadgeText
+                  }
+                >
+                  📷
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            <Text
+              style={
+                styles.profileName
+              }
+            >
+              @{me?.username}
+            </Text>
+
+            <Text
+              style={
+                styles.profileEmail
+              }
+            >
+              {me?.email}
+            </Text>
+
+            <TouchableOpacity
+              style={
+                styles.primaryButton
+              }
+              onPress={
+                showAvatarOptions
+              }
+              disabled={loading}
+            >
+              <Text
+                style={
+                  styles.buttonText
+                }
+              >
+                {me?.avatar
+                  ? "Změnit fotku"
+                  : "Přidat profilovou fotku"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={
+                styles.secondaryButton
+              }
+              onPress={() =>
+                setProfileVisible(
+                  false
+                )
+              }
+            >
+              <Text
+                style={
+                  styles.secondaryText
+                }
+              >
+                Zavřít
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 
@@ -1104,23 +1726,35 @@ function AppContent() {
   // ==================================================
 
   const renderNewChat = () => (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView
+      style={styles.safe}
+    >
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() =>
             setScreen("chats")
           }
         >
-          <Text style={styles.headerAction}>
+          <Text
+            style={
+              styles.headerAction
+            }
+          >
             ← Zpět
           </Text>
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>
+        <Text
+          style={
+            styles.headerTitle
+          }
+        >
           Nový chat
         </Text>
 
-        <View style={{ width: 45 }} />
+        <View
+          style={{ width: 45 }}
+        />
       </View>
 
       <TextInput
@@ -1128,7 +1762,9 @@ function AppContent() {
         placeholder="Hledat uživatele..."
         placeholderTextColor="#777"
         value={searchText}
-        onChangeText={searchUsers}
+        onChangeText={
+          searchUsers
+        }
         autoCapitalize="none"
         autoFocus
       />
@@ -1138,27 +1774,45 @@ function AppContent() {
         keyExtractor={(item) =>
           String(item.id)
         }
-        contentContainerStyle={styles.list}
+        contentContainerStyle={
+          styles.list
+        }
         ListEmptyComponent={
-          <Text style={styles.emptyText}>
+          <Text
+            style={styles.emptyText}
+          >
             Hledání začne po zadání alespoň 2 znaků.
           </Text>
         }
-        renderItem={({ item }) => (
+        renderItem={({
+          item,
+        }) => (
           <TouchableOpacity
-            style={styles.userItem}
+            style={
+              styles.userItem
+            }
             onPress={() =>
-              openChatWithUser(item)
+              openChatWithUser(
+                item
+              )
             }
           >
-            <View style={styles.chatAvatar}>
-              <Text style={styles.avatarText}>
-                👤
-              </Text>
-            </View>
+            {renderAvatar(
+              item.avatar,
+              "👤",
+              48
+            )}
 
-            <View style={styles.chatInfo}>
-              <Text style={styles.chatName}>
+            <View
+              style={
+                styles.chatInfo
+              }
+            >
+              <Text
+                style={
+                  styles.chatName
+                }
+              >
                 {item.username}
               </Text>
 
@@ -1184,200 +1838,299 @@ function AppContent() {
   // NOVÁ SKUPINA
   // ==================================================
 
-  const renderNewGroup = () => (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() =>
-            setScreen("chats")
-          }
+  const renderNewGroup =
+    () => (
+      <SafeAreaView
+        style={styles.safe}
+      >
+        <View
+          style={styles.header}
         >
-          <Text style={styles.headerAction}>
-            ← Zpět
-          </Text>
-        </TouchableOpacity>
-
-        <Text style={styles.headerTitle}>
-          Nová skupina
-        </Text>
-
-        <View style={{ width: 45 }} />
-      </View>
-
-      <View style={styles.groupForm}>
-        <TextInput
-          style={styles.input}
-          placeholder="Název skupiny"
-          placeholderTextColor="#777"
-          value={groupName}
-          onChangeText={setGroupName}
-        />
-
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Hledat lidi..."
-          placeholderTextColor="#777"
-          value={searchText}
-          onChangeText={searchUsers}
-          autoCapitalize="none"
-        />
-
-        <Text style={styles.selectedText}>
-          Vybráno:{" "}
-          {selectedUsers.length}
-        </Text>
-      </View>
-
-      <FlatList
-        data={users}
-        keyExtractor={(item) =>
-          String(item.id)
-        }
-        contentContainerStyle={styles.list}
-        renderItem={({ item }) => {
-          const selected =
-            selectedUsers.some(
-              (user) =>
-                String(user.id) ===
-                String(item.id)
-            );
-
-          return (
-            <TouchableOpacity
-              style={[
-                styles.userItem,
-                selected &&
-                  styles.selectedUser,
-              ]}
-              onPress={() =>
-                toggleUserSelection(item)
+          <TouchableOpacity
+            onPress={() =>
+              setScreen("chats")
+            }
+          >
+            <Text
+              style={
+                styles.headerAction
               }
             >
-              <View style={styles.chatAvatar}>
-                <Text style={styles.avatarText}>
-                  {selected
+              ← Zpět
+            </Text>
+          </TouchableOpacity>
+
+          <Text
+            style={
+              styles.headerTitle
+            }
+          >
+            Nová skupina
+          </Text>
+
+          <View
+            style={{ width: 45 }}
+          />
+        </View>
+
+        <View
+          style={styles.groupForm}
+        >
+          <TextInput
+            style={styles.input}
+            placeholder="Název skupiny"
+            placeholderTextColor="#777"
+            value={groupName}
+            onChangeText={
+              setGroupName
+            }
+          />
+
+          <TextInput
+            style={
+              styles.searchInput
+            }
+            placeholder="Hledat lidi..."
+            placeholderTextColor="#777"
+            value={searchText}
+            onChangeText={
+              searchUsers
+            }
+            autoCapitalize="none"
+          />
+
+          <Text
+            style={
+              styles.selectedText
+            }
+          >
+            Vybráno:{" "}
+            {selectedUsers.length}
+          </Text>
+        </View>
+
+        <FlatList
+          data={users}
+          keyExtractor={(
+            item
+          ) =>
+            String(item.id)
+          }
+          contentContainerStyle={
+            styles.list
+          }
+          renderItem={({
+            item,
+          }) => {
+            const selected =
+              selectedUsers.some(
+                (user) =>
+                  String(
+                    user.id
+                  ) ===
+                  String(
+                    item.id
+                  )
+              );
+
+            return (
+              <TouchableOpacity
+                style={[
+                  styles.userItem,
+                  selected &&
+                    styles.selectedUser,
+                ]}
+                onPress={() =>
+                  toggleUserSelection(
+                    item
+                  )
+                }
+              >
+                {renderAvatar(
+                  item.avatar,
+                  selected
                     ? "✓"
-                    : "👤"}
-                </Text>
-              </View>
+                    : "👤",
+                  48
+                )}
 
-              <View style={styles.chatInfo}>
-                <Text style={styles.chatName}>
-                  {item.username}
-                </Text>
-
-                <Text
-                  style={[
-                    styles.chatStatus,
-                    item.online &&
-                      styles.onlineText,
-                  ]}
+                <View
+                  style={
+                    styles.chatInfo
+                  }
                 >
-                  {item.online
-                    ? "● online"
-                    : "● offline"}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          );
-        }}
-      />
+                  <Text
+                    style={
+                      styles.chatName
+                    }
+                  >
+                    {item.username}
+                  </Text>
 
-      <TouchableOpacity
-        style={styles.primaryButton}
-        onPress={createGroup}
-        disabled={loading}
-      >
-        <Text style={styles.buttonText}>
-          {loading
-            ? "Vytvářím..."
-            : "Vytvořit skupinu"}
-        </Text>
-      </TouchableOpacity>
-    </SafeAreaView>
-  );
+                  <Text
+                    style={[
+                      styles.chatStatus,
+                      item.online &&
+                        styles.onlineText,
+                    ]}
+                  >
+                    {item.online
+                      ? "● online"
+                      : "● offline"}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          }}
+        />
+
+        <TouchableOpacity
+          style={
+            styles.primaryButton
+          }
+          onPress={
+            createGroup
+          }
+          disabled={loading}
+        >
+          <Text
+            style={
+              styles.buttonText
+            }
+          >
+            {loading
+              ? "Vytvářím..."
+              : "Vytvořit skupinu"}
+          </Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
 
   // ==================================================
   // CHAT
   // ==================================================
 
   const renderChat = () => (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView
+      style={styles.safe}
+    >
       <KeyboardAvoidingView
-        style={styles.chatKeyboard}
+        style={
+          styles.chatKeyboard
+        }
         behavior={
           Platform.OS === "ios"
             ? "padding"
             : "height"
         }
         keyboardVerticalOffset={
-          Platform.OS === "android"
-            ? 0
-            : 0
+          0
         }
       >
-        <View style={styles.chatHeader}>
+        <View
+          style={
+            styles.chatHeader
+          }
+        >
           <TouchableOpacity
             onPress={() => {
               setScreen("chats");
-              setCurrentChat(null);
+              setCurrentChat(
+                null
+              );
               setMessages([]);
               setGroupInfo(null);
             }}
           >
-            <Text style={styles.headerAction}>
+            <Text
+              style={
+                styles.headerAction
+              }
+            >
               ←
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.chatHeaderCenter}
+            style={
+              styles.chatHeaderCenter
+            }
             onPress={() => {
               if (
                 currentChat?.type ===
                 "group"
               ) {
-                setMembersVisible(true);
+                setMembersVisible(
+                  true
+                );
               }
             }}
           >
-            <Text
-              style={styles.chatHeaderTitle}
-              numberOfLines={1}
-            >
-              {currentChat?.type ===
-              "group"
-                ? currentChat?.name ||
-                  groupInfo?.name ||
-                  "Skupina"
-                : currentChat?.user
-                    ?.username ||
-                  currentChat?.username ||
-                  "Chat"}
-            </Text>
-
             {currentChat?.type ===
-            "group" ? (
-              <Text style={styles.chatHeaderSub}>
-                {groupInfo?.members
-                  ?.length || 0}{" "}
-                členů
-              </Text>
-            ) : (
-              <Text
-                style={[
-                  styles.chatHeaderSub,
+            "group"
+              ? renderAvatar(
+                  null,
+                  "👥",
+                  42
+                )
+              : renderAvatar(
                   currentChat?.user
-                    ?.online &&
-                    styles.onlineText,
-                ]}
+                    ?.avatar,
+                  "👤",
+                  42
+                )}
+
+            <View
+              style={
+                styles.chatHeaderTextBox
+              }
+            >
+              <Text
+                style={
+                  styles.chatHeaderTitle
+                }
+                numberOfLines={1}
               >
-                {currentChat?.user
-                  ?.online
-                  ? "● online"
-                  : "● offline"}
+                {currentChat?.type ===
+                "group"
+                  ? currentChat?.name ||
+                    groupInfo?.name ||
+                    "Skupina"
+                  : currentChat?.user
+                      ?.username ||
+                    currentChat?.username ||
+                    "Chat"}
               </Text>
-            )}
+
+              {currentChat?.type ===
+              "group" ? (
+                <Text
+                  style={
+                    styles.chatHeaderSub
+                  }
+                >
+                  {groupInfo
+                    ?.members
+                    ?.length || 0}{" "}
+                  členů
+                </Text>
+              ) : (
+                <Text
+                  style={[
+                    styles.chatHeaderSub,
+                    currentChat
+                      ?.user
+                      ?.online &&
+                      styles.onlineText,
+                  ]}
+                >
+                  {currentChat?.user
+                    ?.online
+                    ? "● online"
+                    : "● offline"}
+                </Text>
+              )}
+            </View>
           </TouchableOpacity>
 
           {currentChat?.type ===
@@ -1389,36 +2142,57 @@ function AppContent() {
                     groupInfo?.name ||
                     ""
                 );
-                setRenameVisible(true);
+                setRenameVisible(
+                  true
+                );
               }}
             >
-              <Text style={styles.headerAction}>
+              <Text
+                style={
+                  styles.headerAction
+                }
+              >
                 ✎
               </Text>
             </TouchableOpacity>
           ) : (
-            <View style={{ width: 30 }} />
+            <View
+              style={{ width: 30 }}
+            />
           )}
         </View>
 
         <FlatList
-          style={styles.messagesList}
+          style={
+            styles.messagesList
+          }
           data={messages}
-          keyExtractor={(item, index) =>
+          keyExtractor={(
+            item,
+            index
+          ) =>
             String(
               item.id || index
             )
           }
-          contentContainerStyle={styles.messages}
+          contentContainerStyle={
+            styles.messages
+          }
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
             messagesLoading ? null : (
-              <Text style={styles.emptyText}>
+              <Text
+                style={
+                  styles.emptyText
+                }
+              >
                 Začni konverzaci.
               </Text>
             )
           }
-          renderItem={({ item }) => {
+          renderItem={({
+            item,
+          }) => {
             const senderId =
               item.senderId ??
               item.sender_id ??
@@ -1434,15 +2208,20 @@ function AppContent() {
               item.is_ryp === true ||
               item.senderUsername ===
                 "Rýp" ||
-              item.username === "Rýp";
+              item.username ===
+                "Rýp";
 
             return (
               <TouchableOpacity
                 activeOpacity={
-                  isMine ? 0.7 : 1
+                  isMine
+                    ? 0.7
+                    : 1
                 }
                 onLongPress={() =>
-                  deleteMessage(item)
+                  deleteMessage(
+                    item
+                  )
                 }
                 style={[
                   styles.messageRow,
@@ -1477,17 +2256,37 @@ function AppContent() {
                       </Text>
                     )}
 
-                  <Text
-                    style={[
-                      styles.messageText,
-                      isMine &&
-                        styles.myMessageText,
-                    ]}
-                  >
-                    {item.content ||
-                      item.message ||
-                      ""}
-                  </Text>
+                  {item.image ? (
+                    <Image
+                      source={{
+                        uri: item.image,
+                      }}
+                      style={
+                        styles.messageImage
+                      }
+                      resizeMode="cover"
+                    />
+                  ) : null}
+
+                  {(
+                    item.content ||
+                    item.message ||
+                    ""
+                  ).trim() ? (
+                    <Text
+                      style={[
+                        styles.messageText,
+                        isMine &&
+                          styles.myMessageText,
+                        item.image &&
+                          styles.imageCaption,
+                      ]}
+                    >
+                      {item.content ||
+                        item.message ||
+                        ""}
+                    </Text>
+                  ) : null}
                 </View>
               </TouchableOpacity>
             );
@@ -1499,24 +2298,59 @@ function AppContent() {
             styles.inputBar,
             {
               paddingBottom:
-                Math.max(insets.bottom, 8),
+                Math.max(
+                  insets.bottom,
+                  8
+                ),
             },
           ]}
         >
+          <TouchableOpacity
+            style={
+              styles.photoButton
+            }
+            onPress={
+              showPhotoOptions
+            }
+            disabled={
+              imageSending
+            }
+          >
+            <Text
+              style={
+                styles.photoButtonText
+              }
+            >
+              📷
+            </Text>
+          </TouchableOpacity>
+
           <TextInput
-            style={styles.messageInput}
+            style={
+              styles.messageInput
+            }
             placeholder="Napiš zprávu..."
             placeholderTextColor="#777"
             value={messageText}
-            onChangeText={setMessageText}
+            onChangeText={
+              setMessageText
+            }
             multiline
           />
 
           <TouchableOpacity
-            style={styles.sendButton}
-            onPress={sendMessage}
+            style={
+              styles.sendButton
+            }
+            onPress={
+              sendMessage
+            }
           >
-            <Text style={styles.sendText}>
+            <Text
+              style={
+                styles.sendText
+              }
+            >
               ➤
             </Text>
           </TouchableOpacity>
@@ -1529,28 +2363,50 @@ function AppContent() {
         transparent
         animationType="slide"
         onRequestClose={() =>
-          setMembersVisible(false)
+          setMembersVisible(
+            false
+          )
         }
       >
-        <View style={styles.modalBackground}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>
+        <View
+          style={
+            styles.modalBackground
+          }
+        >
+          <View
+            style={
+              styles.modalBox
+            }
+          >
+            <Text
+              style={
+                styles.modalTitle
+              }
+            >
               Členové skupiny
             </Text>
 
             <FlatList
               data={
-                groupInfo?.members || []
+                groupInfo?.members ||
+                []
               }
-              keyExtractor={(item) =>
+              keyExtractor={(
+                item
+              ) =>
                 String(item.id)
               }
-              style={styles.memberList}
-              renderItem={({ item }) => {
+              style={
+                styles.memberList
+              }
+              renderItem={({
+                item,
+              }) => {
                 const isRyp =
                   item.isRyp ||
                   item.is_ryp ||
-                  item.username === "Rýp";
+                  item.username ===
+                    "Rýp";
 
                 return (
                   <View
@@ -1558,41 +2414,63 @@ function AppContent() {
                       styles.memberItem
                     }
                   >
-                    <Text
+                    {renderAvatar(
+                      item.avatar,
+                      isRyp
+                        ? "😈"
+                        : "👤",
+                      40
+                    )}
+
+                    <View
                       style={
-                        styles.memberName
+                        styles.memberInfo
                       }
                     >
-                      {isRyp
-                        ? "😈 Rýp"
-                        : item.username}
-                    </Text>
+                      <Text
+                        style={
+                          styles.memberName
+                        }
+                      >
+                        {isRyp
+                          ? "😈 Rýp"
+                          : item.username}
+                      </Text>
 
-                    <Text
-                      style={[
-                        styles.memberStatus,
-                        (item.online ||
-                          isRyp) &&
-                          styles.onlineText,
-                      ]}
-                    >
-                      {isRyp ||
-                      item.online
-                        ? "● online"
-                        : "● offline"}
-                    </Text>
+                      <Text
+                        style={[
+                          styles.memberStatus,
+                          (item.online ||
+                            isRyp) &&
+                            styles.onlineText,
+                        ]}
+                      >
+                        {isRyp ||
+                        item.online
+                          ? "● online"
+                          : "● offline"}
+                      </Text>
+                    </View>
                   </View>
                 );
               }}
             />
 
             <TouchableOpacity
-              style={styles.secondaryButton}
+              style={
+                styles.secondaryButton
+              }
               onPress={() =>
-                setMembersVisible(false)
+                setMembersVisible(
+                  false
+                )
               }
             >
-              <Text style={styles.secondaryText}>
+              <Text
+                style={
+                  styles.secondaryText
+                }
+              >
                 Zavřít
               </Text>
             </TouchableOpacity>
@@ -1606,40 +2484,72 @@ function AppContent() {
         transparent
         animationType="fade"
         onRequestClose={() =>
-          setRenameVisible(false)
+          setRenameVisible(
+            false
+          )
         }
       >
-        <View style={styles.modalBackground}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>
+        <View
+          style={
+            styles.modalBackground
+          }
+        >
+          <View
+            style={
+              styles.modalBox
+            }
+          >
+            <Text
+              style={
+                styles.modalTitle
+              }
+            >
               Přejmenovat skupinu
             </Text>
 
             <TextInput
               style={styles.input}
               value={renameText}
-              onChangeText={setRenameText}
+              onChangeText={
+                setRenameText
+              }
               placeholder="Název skupiny"
               placeholderTextColor="#777"
               autoFocus
             />
 
             <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={renameGroup}
+              style={
+                styles.primaryButton
+              }
+              onPress={
+                renameGroup
+              }
             >
-              <Text style={styles.buttonText}>
+              <Text
+                style={
+                  styles.buttonText
+                }
+              >
                 Uložit
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.secondaryButton}
+              style={
+                styles.secondaryButton
+              }
               onPress={() =>
-                setRenameVisible(false)
+                setRenameVisible(
+                  false
+                )
               }
             >
-              <Text style={styles.secondaryText}>
+              <Text
+                style={
+                  styles.secondaryText
+                }
+              >
                 Zrušit
               </Text>
             </TouchableOpacity>
@@ -1653,7 +2563,9 @@ function AppContent() {
   // ROUTER
   // ==================================================
 
-  if (screen === "welcome") {
+  if (
+    screen === "welcome"
+  ) {
     return (
       <>
         <StatusBar
@@ -1665,7 +2577,9 @@ function AppContent() {
     );
   }
 
-  if (screen === "login") {
+  if (
+    screen === "login"
+  ) {
     return (
       <>
         <StatusBar
@@ -1677,7 +2591,9 @@ function AppContent() {
     );
   }
 
-  if (screen === "register") {
+  if (
+    screen === "register"
+  ) {
     return (
       <>
         <StatusBar
@@ -1689,7 +2605,9 @@ function AppContent() {
     );
   }
 
-  if (screen === "newChat") {
+  if (
+    screen === "newChat"
+  ) {
     return (
       <>
         <StatusBar
@@ -1701,7 +2619,9 @@ function AppContent() {
     );
   }
 
-  if (screen === "newGroup") {
+  if (
+    screen === "newGroup"
+  ) {
     return (
       <>
         <StatusBar
@@ -1713,7 +2633,9 @@ function AppContent() {
     );
   }
 
-  if (screen === "chat") {
+  if (
+    screen === "chat"
+  ) {
     return (
       <>
         <StatusBar
@@ -1846,13 +2768,23 @@ const styles = StyleSheet.create({
   },
 
   header: {
-    height: 70,
+    minHeight: 70,
     paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     borderBottomWidth: 1,
     borderBottomColor: "#202020",
+  },
+
+  headerProfile: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+
+  headerUserBox: {
+    marginLeft: 10,
   },
 
   headerTitle: {
@@ -1920,13 +2852,15 @@ const styles = StyleSheet.create({
   },
 
   chatAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
     backgroundColor: "#202020",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
+  },
+
+  avatarImage: {
+    marginRight: 12,
+    backgroundColor: "#202020",
   },
 
   avatarText: {
@@ -1988,8 +2922,16 @@ const styles = StyleSheet.create({
 
   chatHeaderCenter: {
     flex: 1,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 10,
+  },
+
+  chatHeaderTextBox: {
+    marginLeft: 8,
+    alignItems: "center",
+    maxWidth: "70%",
   },
 
   chatHeaderTitle: {
@@ -2059,6 +3001,18 @@ const styles = StyleSheet.create({
     color: "#ffad42",
   },
 
+  messageImage: {
+    width: 240,
+    height: 240,
+    borderRadius: 10,
+    backgroundColor: "#222222",
+    marginBottom: 4,
+  },
+
+  imageCaption: {
+    marginTop: 4,
+  },
+
   inputBar: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -2079,6 +3033,20 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     marginRight: 8,
+  },
+
+  photoButton: {
+    width: 45,
+    height: 45,
+    borderRadius: 23,
+    backgroundColor: "#171717",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 7,
+  },
+
+  photoButtonText: {
+    fontSize: 21,
   },
 
   sendButton: {
@@ -2111,6 +3079,14 @@ const styles = StyleSheet.create({
     maxHeight: "80%",
   },
 
+  profileModal: {
+    backgroundColor: "#111111",
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    padding: 20,
+    alignItems: "center",
+  },
+
   modalTitle: {
     color: "#ffffff",
     fontSize: 22,
@@ -2118,14 +3094,56 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
 
+  profileAvatarButton: {
+    position: "relative",
+    marginBottom: 15,
+  },
+
+  cameraBadge: {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#1877f2",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 3,
+    borderColor: "#111111",
+  },
+
+  cameraBadgeText: {
+    fontSize: 16,
+  },
+
+  profileName: {
+    color: "#ffffff",
+    fontSize: 21,
+    fontWeight: "800",
+  },
+
+  profileEmail: {
+    color: "#777777",
+    fontSize: 14,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+
   memberList: {
     marginBottom: 10,
   },
 
   memberItem: {
-    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: "#222222",
+  },
+
+  memberInfo: {
+    flex: 1,
   },
 
   memberName: {
