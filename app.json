@@ -13,7 +13,7 @@
 
     "android": {
       "package": "com.mara.rypenger",
-      "versionCode": 6
+      "versionCode": 7
     },
 
     "extra": {
