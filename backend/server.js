@@ -72,6 +72,10 @@ Pokud se někdo ptá, kdo tě vytvořil, odpověz:
 Jméno Mára nepoužívej automaticky.
 `;
 
+// =========================
+// WEB SEARCH
+// =========================
+
 async function searchWeb(query) {
   const response = await fetch(
     "https://api.tavily.com/search",
@@ -237,6 +241,23 @@ async function askGroq(messages) {
 }
 
 // =========================
+// ONLINE STATUS
+// =========================
+
+function isOnline(lastSeen) {
+  if (!lastSeen) return false;
+
+  const last =
+    new Date(lastSeen).getTime();
+
+  const now = Date.now();
+
+  return (
+    now - last <= 90 * 1000
+  );
+}
+
+// =========================
 // DATABASE
 // =========================
 
@@ -251,9 +272,10 @@ async function initDatabase() {
     )
   `);
 
-  // Rýp potřebuje vlastní uživatelský účet.
-  // Nejdříve odstraníme starý UNIQUE constraint
-  // na dvojici uživatelů, aby skupiny mohly být libovolné.
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS conversations (
@@ -312,7 +334,6 @@ async function initDatabase() {
     )
   `);
 
-  // Starší 1:1 chaty
   await pool.query(`
     INSERT INTO conversation_members
       (conversation_id, user_id)
@@ -421,7 +442,7 @@ async function initDatabase() {
 // AUTH
 // =========================
 
-function authenticateToken(
+async function authenticateToken(
   req,
   res,
   next
@@ -448,9 +469,19 @@ function authenticateToken(
       JWT_SECRET
     );
 
+    // Aktualizace aktivity uživatele.
+    await pool.query(
+      `
+      UPDATE users
+      SET last_seen = CURRENT_TIMESTAMP
+      WHERE id = $1
+      `,
+      [req.user.id]
+    );
+
     next();
 
-  } catch {
+  } catch (error) {
     return res.status(401).json({
       error:
         "Neplatný nebo prošlý token."
@@ -699,6 +730,15 @@ app.post(
         });
       }
 
+      await pool.query(
+        `
+        UPDATE users
+        SET last_seen = CURRENT_TIMESTAMP
+        WHERE id = $1
+        `,
+        [user.id]
+      );
+
       const token =
         jwt.sign(
           {
@@ -756,7 +796,8 @@ app.get(
           SELECT
             id,
             username,
-            email
+            email,
+            last_seen
           FROM users
           WHERE id = $1
           `,
@@ -782,7 +823,11 @@ app.get(
           username:
             user.username,
           email:
-            user.email
+            user.email,
+          lastSeen:
+            user.last_seen,
+          online:
+            true
         }
       });
 
@@ -827,20 +872,23 @@ app.get(
           SELECT
             id,
             username,
-            email
+            email,
+            last_seen
           FROM users
           WHERE id != $1
+          AND email != $2
           AND (
             LOWER(username)
-              LIKE LOWER($2)
+              LIKE LOWER($3)
             OR LOWER(email)
-              LIKE LOWER($2)
+              LIKE LOWER($3)
           )
           ORDER BY username
           LIMIT 20
           `,
           [
             req.user.id,
+            RYP_EMAIL,
             `%${q}%`
           ]
         );
@@ -854,7 +902,13 @@ app.get(
               username:
                 user.username,
               email:
-                user.email
+                user.email,
+              lastSeen:
+                user.last_seen,
+              online:
+                isOnline(
+                  user.last_seen
+                )
             })
           )
       });
@@ -910,11 +964,16 @@ app.post(
           SELECT
             id,
             username,
-            email
+            email,
+            last_seen
           FROM users
           WHERE id = $1
+          AND email != $2
           `,
-          [otherUserId]
+          [
+            otherUserId,
+            RYP_EMAIL
+          ]
         );
 
       if (
@@ -1017,7 +1076,15 @@ app.post(
                 .username,
             email:
               otherUser.rows[0]
-                .email
+                .email,
+            lastSeen:
+              otherUser.rows[0]
+                .last_seen,
+            online:
+              isOnline(
+                otherUser.rows[0]
+                  .last_seen
+              )
           }
         }
       });
@@ -1109,7 +1176,8 @@ app.post(
           SELECT
             id,
             username,
-            email
+            email,
+            last_seen
           FROM users
           WHERE id = ANY(
             $1::bigint[]
@@ -1127,6 +1195,20 @@ app.post(
             "Některý z vybraných uživatelů neexistuje."
         });
       }
+
+      // Rýp
+      const rypResult =
+        await pool.query(
+          `
+          SELECT id
+          FROM users
+          WHERE email = $1
+          `,
+          [RYP_EMAIL]
+        );
+
+      const rypId =
+        rypResult.rows[0]?.id;
 
       await client.query(
         "BEGIN"
@@ -1153,8 +1235,7 @@ app.post(
         );
 
       const conversation =
-        conversationResult
-          .rows[0];
+        conversationResult.rows[0];
 
       for (
         const memberId
@@ -1178,11 +1259,95 @@ app.post(
         );
       }
 
+      // Rýp je automaticky členem každé nové skupiny.
+      if (rypId) {
+        await client.query(
+          `
+          INSERT INTO conversation_members
+          (
+            conversation_id,
+            user_id
+          )
+          VALUES ($1, $2)
+          ON CONFLICT DO NOTHING
+          `,
+          [
+            conversation.id,
+            rypId
+          ]
+        );
+      }
+
       await client.query(
         "COMMIT"
       );
 
+      const finalMembers =
+        await pool.query(
+          `
+          SELECT
+            u.id,
+            u.username,
+            u.email,
+            u.last_seen
+          FROM conversation_members cm
+
+          JOIN users u
+            ON u.id = cm.user_id
+
+          WHERE cm.conversation_id =
+            $1
+
+          ORDER BY
+            CASE
+              WHEN u.email = $2
+              THEN 0
+              ELSE 1
+            END,
+            u.username
+          `,
+          [
+            conversation.id,
+            RYP_EMAIL
+          ]
+        );
+
+      const members =
+        finalMembers.rows.map(
+          member => ({
+            id:
+              member.id.toString(),
+            username:
+              member.username,
+            email:
+              member.email,
+            lastSeen:
+              member.last_seen,
+            online:
+              member.email === RYP_EMAIL
+                ? true
+                : isOnline(
+                    member.last_seen
+                  ),
+            isRyp:
+              member.email ===
+              RYP_EMAIL
+          })
+        );
+
       res.status(201).json({
+        group: {
+          id:
+            conversation.id
+              .toString(),
+          type: "group",
+          name:
+            conversation.name,
+          members
+        },
+
+        // Zachováme i starý název
+        // pro kompatibilitu.
         conversation: {
           id:
             conversation.id
@@ -1190,17 +1355,7 @@ app.post(
           type: "group",
           name:
             conversation.name,
-          members:
-            usersResult.rows.map(
-              user => ({
-                id:
-                  user.id.toString(),
-                username:
-                  user.username,
-                email:
-                  user.email
-              })
-            )
+          members
         }
       });
 
@@ -1262,7 +1417,18 @@ app.get(
                   ELSE u1.username
                 END
               ELSE NULL
-            END AS other_username
+            END AS other_username,
+
+            CASE
+              WHEN c.type = 'private'
+              THEN
+                CASE
+                  WHEN c.user_one = $1
+                  THEN u2.last_seen
+                  ELSE u1.last_seen
+                END
+              ELSE NULL
+            END AS other_last_seen
 
           FROM conversations c
 
@@ -1306,7 +1472,15 @@ app.get(
                           .toString(),
 
                       username:
-                        chat.other_username
+                        chat.other_username,
+
+                      lastSeen:
+                        chat.other_last_seen,
+
+                      online:
+                        isOnline(
+                          chat.other_last_seen
+                        )
                     }
                   : null
             })
@@ -1379,7 +1553,8 @@ app.get(
           SELECT
             u.id,
             u.username,
-            u.email
+            u.email,
+            u.last_seen
 
           FROM conversation_members cm
 
@@ -1389,9 +1564,18 @@ app.get(
           WHERE cm.conversation_id =
             $1
 
-          ORDER BY u.username
+          ORDER BY
+            CASE
+              WHEN u.email = $2
+              THEN 0
+              ELSE 1
+            END,
+            u.username
           `,
-          [groupId]
+          [
+            groupId,
+            RYP_EMAIL
+          ]
         );
 
       res.json({
@@ -1409,10 +1593,27 @@ app.get(
               user => ({
                 id:
                   user.id.toString(),
+
                 username:
                   user.username,
+
                 email:
-                  user.email
+                  user.email,
+
+                lastSeen:
+                  user.last_seen,
+
+                online:
+                  user.email ===
+                  RYP_EMAIL
+                    ? true
+                    : isOnline(
+                        user.last_seen
+                      ),
+
+                isRyp:
+                  user.email ===
+                  RYP_EMAIL
               })
             )
         }
@@ -1433,8 +1634,109 @@ app.get(
 );
 
 // =========================
-// POMOCNÁ FUNKCE
-// RÝP ODPOVÍ DO SKUPINY
+// PŘEJMENOVÁNÍ SKUPINY
+// =========================
+
+app.patch(
+  "/groups/:groupId",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const groupId =
+        Number(
+          req.params.groupId
+        );
+
+      const name =
+        (
+          req.body.name ||
+          ""
+        ).trim();
+
+      if (!name) {
+        return res.status(400).json({
+          error:
+            "Název skupiny nesmí být prázdný."
+        });
+      }
+
+      if (name.length > 100) {
+        return res.status(400).json({
+          error:
+            "Název skupiny je příliš dlouhý."
+        });
+      }
+
+      const access =
+        await pool.query(
+          `
+          SELECT c.id
+          FROM conversations c
+
+          JOIN conversation_members cm
+            ON cm.conversation_id =
+              c.id
+
+          WHERE c.id = $1
+          AND cm.user_id = $2
+          AND c.type = 'group'
+          `,
+          [
+            groupId,
+            req.user.id
+          ]
+        );
+
+      if (
+        access.rows.length === 0
+      ) {
+        return res.status(403).json({
+          error:
+            "Tuto skupinu nemůžeš upravit."
+        });
+      }
+
+      const result =
+        await pool.query(
+          `
+          UPDATE conversations
+          SET name = $1
+          WHERE id = $2
+          AND type = 'group'
+          RETURNING id, name
+          `,
+          [
+            name,
+            groupId
+          ]
+        );
+
+      res.json({
+        group: {
+          id:
+            result.rows[0]
+              .id.toString(),
+          name:
+            result.rows[0].name
+        }
+      });
+
+    } catch (error) {
+      console.error(
+        "RENAME GROUP ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Skupinu se nepodařilo přejmenovat."
+      });
+    }
+  }
+);
+
+// =========================
+// RÝP ODPOVĚĎ
 // =========================
 
 async function generateRypReply(
@@ -1452,7 +1754,6 @@ async function generateRypReply(
         "Ahoj Rýpe, co ty na to?";
     }
 
-    // Posledních 12 zpráv
     const historyResult =
       await pool.query(
         `
@@ -1518,7 +1819,6 @@ ${cleanMessage}
 Odpověz přímo jemu v kontextu této skupinové konverzace.`
     });
 
-    // Web podle potřeby
     if (
       needsWebSearch(
         cleanMessage
@@ -1566,7 +1866,6 @@ Použij tyto informace pouze jako zdroj pro odpověď.
         );
     }
 
-    // Najdeme Rýpův účet
     const rypUser =
       await pool.query(
         `
@@ -1588,7 +1887,6 @@ Použij tyto informace pouze jako zdroj pro odpověď.
     const rypId =
       rypUser.rows[0].id;
 
-    // Rýp musí být členem chatu.
     await pool.query(
       `
       INSERT INTO conversation_members
@@ -1605,7 +1903,6 @@ Použij tyto informace pouze jako zdroj pro odpověď.
       ]
     );
 
-    // Uložíme Rýpovu odpověď
     const inserted =
       await pool.query(
         `
@@ -1765,10 +2062,6 @@ app.post(
           newMessage.created_at
       };
 
-      // =========================
-      // RÝP
-      // =========================
-
       let rypMessage = null;
 
       if (
@@ -1903,6 +2196,70 @@ app.get(
       res.status(500).json({
         error:
           "Chyba při načítání zpráv."
+      });
+    }
+  }
+);
+
+// =========================
+// SMAZÁNÍ VLASTNÍ ZPRÁVY
+// =========================
+
+app.delete(
+  "/messages/:messageId",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const messageId =
+        Number(
+          req.params.messageId
+        );
+
+      if (!messageId) {
+        return res.status(400).json({
+          error:
+            "Neplatné ID zprávy."
+        });
+      }
+
+      const result =
+        await pool.query(
+          `
+          DELETE FROM messages
+          WHERE id = $1
+          AND sender_id = $2
+          RETURNING id
+          `,
+          [
+            messageId,
+            req.user.id
+          ]
+        );
+
+      if (
+        result.rows.length === 0
+      ) {
+        return res.status(404).json({
+          error:
+            "Zpráva neexistuje nebo ji nemůžeš smazat."
+        });
+      }
+
+      res.json({
+        success: true,
+        messageId:
+          result.rows[0].id.toString()
+      });
+
+    } catch (error) {
+      console.error(
+        "DELETE MESSAGE ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Zprávu se nepodařilo smazat."
       });
     }
   }
