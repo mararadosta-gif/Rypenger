@@ -39,6 +39,10 @@ export default function App() {
   const [messageText, setMessageText] = useState("");
   const [messagesLoading, setMessagesLoading] = useState(false);
 
+  // SKUPINA
+  const [groupName, setGroupName] = useState("");
+  const [selectedUsers, setSelectedUsers] = useState([]);
+
   // AUTOMATICKÉ PŘIHLÁŠENÍ
   useEffect(() => {
     checkSavedLogin();
@@ -107,16 +111,15 @@ export default function App() {
         return;
       }
 
-      await AsyncStorage.setItem(
-        TOKEN_KEY,
-        data.token
-      );
+      await AsyncStorage.setItem(TOKEN_KEY, data.token);
 
       setUser(data.user);
       setUsername("");
       setEmail("");
       setPassword("");
       setScreen("chats");
+
+      loadConversations(data.token);
 
       Alert.alert("Hotovo", "Účet byl vytvořen.");
     } catch (error) {
@@ -160,10 +163,7 @@ export default function App() {
         return;
       }
 
-      await AsyncStorage.setItem(
-        TOKEN_KEY,
-        data.token
-      );
+      await AsyncStorage.setItem(TOKEN_KEY, data.token);
 
       setUser(data.user);
       setEmail("");
@@ -248,7 +248,7 @@ export default function App() {
     }
   };
 
-  // OTEVŘENÍ / VYTVOŘENÍ CHATU
+  // OTEVŘENÍ / VYTVOŘENÍ 1:1 CHATU
   const openChatWithUser = async (selectedUser) => {
     try {
       const token = await AsyncStorage.getItem(TOKEN_KEY);
@@ -279,6 +279,7 @@ export default function App() {
 
       const chat = {
         id: data.conversation.id,
+        type: "private",
         user: data.conversation.user,
       };
 
@@ -304,6 +305,97 @@ export default function App() {
     setMessages([]);
     setScreen("chat");
     loadMessages(chat.id);
+  };
+
+  // VÝBĚR UŽIVATELE DO SKUPINY
+  const toggleUserSelection = (selectedUser) => {
+    setSelectedUsers((oldUsers) => {
+      const exists = oldUsers.some(
+        (item) => String(item.id) === String(selectedUser.id)
+      );
+
+      if (exists) {
+        return oldUsers.filter(
+          (item) =>
+            String(item.id) !== String(selectedUser.id)
+        );
+      }
+
+      return [...oldUsers, selectedUser];
+    });
+  };
+
+  // VYTVOŘENÍ SKUPINY
+  const createGroup = async () => {
+    const name = groupName.trim();
+
+    if (!name) {
+      Alert.alert("Skupina", "Zadej název skupiny.");
+      return;
+    }
+
+    if (selectedUsers.length === 0) {
+      Alert.alert(
+        "Skupina",
+        "Vyber alespoň jednoho dalšího uživatele."
+      );
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const token = await AsyncStorage.getItem(TOKEN_KEY);
+
+      const response = await fetch(`${API_URL}/groups`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name,
+          memberIds: selectedUsers.map((item) => item.id),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        Alert.alert(
+          "Chyba",
+          data.error || "Skupinu se nepodařilo vytvořit."
+        );
+        return;
+      }
+
+      const group = {
+        id: data.group.id,
+        type: "group",
+        name: data.group.name || name,
+        members: data.group.members || [],
+      };
+
+      setGroupName("");
+      setSelectedUsers([]);
+      setSearch("");
+      setUsers([]);
+      setMessages([]);
+      setCurrentChat(group);
+      setScreen("chat");
+
+      await loadConversations(token);
+      await loadMessages(group.id);
+    } catch (error) {
+      console.log("Vytváření skupiny:", error);
+
+      Alert.alert(
+        "Chyba připojení",
+        "Nepodařilo se spojit se serverem."
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   // NAČTENÍ ZPRÁV
@@ -391,6 +483,8 @@ export default function App() {
     setConversations([]);
     setCurrentChat(null);
     setMessages([]);
+    setSelectedUsers([]);
+    setGroupName("");
     setScreen("welcome");
   };
 
@@ -476,9 +570,7 @@ export default function App() {
             disabled={loading}
           >
             <Text style={styles.buttonText}>
-              {loading
-                ? "Přihlašuji..."
-                : "Přihlásit"}
+              {loading ? "Přihlašuji..." : "Přihlásit"}
             </Text>
           </TouchableOpacity>
 
@@ -566,18 +658,41 @@ export default function App() {
             </View>
           </View>
 
-          <TouchableOpacity
-            style={styles.newChatButton}
-            onPress={() => {
-              setSearch("");
-              setUsers([]);
-              setScreen("newChat");
-            }}
-          >
-            <Text style={styles.newChatText}>
-              + Nový chat
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.newButtonsRow}>
+            <TouchableOpacity
+              style={[
+                styles.newChatButton,
+                styles.newButtonHalf,
+              ]}
+              onPress={() => {
+                setSearch("");
+                setUsers([]);
+                setScreen("newChat");
+              }}
+            >
+              <Text style={styles.newChatText}>
+                + Nový chat
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.newChatButton,
+                styles.groupButton,
+              ]}
+              onPress={() => {
+                setGroupName("");
+                setSearch("");
+                setUsers([]);
+                setSelectedUsers([]);
+                setScreen("newGroup");
+              }}
+            >
+              <Text style={styles.newChatText}>
+                + Skupina
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           {conversations.length === 0 ? (
             <View style={styles.empty}>
@@ -592,30 +707,58 @@ export default function App() {
           ) : (
             <FlatList
               data={conversations}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item) =>
+                String(item.id)
+              }
               contentContainerStyle={{
                 paddingTop: 15,
               }}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.chatItem}
-                  onPress={() =>
-                    openExistingChat(item)
-                  }
-                >
-                  <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>
-                      {item.user.username
-                        .charAt(0)
-                        .toUpperCase()}
-                    </Text>
-                  </View>
+              renderItem={({ item }) => {
+                const isGroup =
+                  item.type === "group";
 
-                  <Text style={styles.chatName}>
-                    {item.user.username}
-                  </Text>
-                </TouchableOpacity>
-              )}
+                const displayName = isGroup
+                  ? item.name || "Skupina"
+                  : item.user?.username || "Uživatel";
+
+                const firstLetter =
+                  displayName
+                    .charAt(0)
+                    .toUpperCase();
+
+                return (
+                  <TouchableOpacity
+                    style={styles.chatItem}
+                    onPress={() =>
+                      openExistingChat(item)
+                    }
+                  >
+                    <View
+                      style={[
+                        styles.avatar,
+                        isGroup &&
+                          styles.groupAvatar,
+                      ]}
+                    >
+                      <Text style={styles.avatarText}>
+                        {isGroup ? "👥" : firstLetter}
+                      </Text>
+                    </View>
+
+                    <View style={styles.chatItemInfo}>
+                      <Text style={styles.chatName}>
+                        {displayName}
+                      </Text>
+
+                      {isGroup && (
+                        <Text style={styles.groupLabel}>
+                          Skupina
+                        </Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                );
+              }}
             />
           )}
 
@@ -674,7 +817,9 @@ export default function App() {
 
           <FlatList
             data={users}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item) =>
+              String(item.id)
+            }
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={styles.userItem}
@@ -705,6 +850,172 @@ export default function App() {
         </View>
       )}
 
+      {/* NOVÁ SKUPINA */}
+      {screen === "newGroup" && (
+        <View style={styles.chats}>
+          <View style={styles.topRow}>
+            <TouchableOpacity
+              onPress={() => {
+                setGroupName("");
+                setSearch("");
+                setUsers([]);
+                setSelectedUsers([]);
+                setScreen("chats");
+              }}
+            >
+              <Text style={styles.backButton}>
+                ←
+              </Text>
+            </TouchableOpacity>
+
+            <Text style={styles.topTitle}>
+              Nová skupina
+            </Text>
+          </View>
+
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Název skupiny..."
+            placeholderTextColor="#777"
+            value={groupName}
+            onChangeText={setGroupName}
+            autoCapitalize="sentences"
+          />
+
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Hledat uživatele..."
+            placeholderTextColor="#777"
+            value={search}
+            onChangeText={searchUsers}
+            autoCapitalize="none"
+          />
+
+          {selectedUsers.length > 0 && (
+            <View style={styles.selectedBox}>
+              <Text style={styles.selectedTitle}>
+                Vybraní členové: {selectedUsers.length}
+              </Text>
+
+              <FlatList
+                horizontal
+                data={selectedUsers}
+                keyExtractor={(item) =>
+                  String(item.id)
+                }
+                showsHorizontalScrollIndicator={false}
+                renderItem={({ item }) => (
+                  <View style={styles.selectedUser}>
+                    <View style={styles.smallAvatar}>
+                      <Text style={styles.smallAvatarText}>
+                        {item.username
+                          .charAt(0)
+                          .toUpperCase()}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.selectedUserName}>
+                      {item.username}
+                    </Text>
+                  </View>
+                )}
+              />
+            </View>
+          )}
+
+          {searchLoading && (
+            <Text style={styles.searchStatus}>
+              Hledám...
+            </Text>
+          )}
+
+          {!searchLoading &&
+            search.length >= 2 &&
+            users.length === 0 && (
+              <Text style={styles.searchStatus}>
+                Žádný uživatel nenalezen.
+              </Text>
+            )}
+
+          <FlatList
+            data={users}
+            keyExtractor={(item) =>
+              String(item.id)
+            }
+            renderItem={({ item }) => {
+              const selected =
+                selectedUsers.some(
+                  (selectedUser) =>
+                    String(selectedUser.id) ===
+                    String(item.id)
+                );
+
+              return (
+                <TouchableOpacity
+                  style={[
+                    styles.userItem,
+                    selected &&
+                      styles.userItemSelected,
+                  ]}
+                  onPress={() =>
+                    toggleUserSelection(item)
+                  }
+                >
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>
+                      {item.username
+                        .charAt(0)
+                        .toUpperCase()}
+                    </Text>
+                  </View>
+
+                  <View style={styles.userInfoFlex}>
+                    <Text style={styles.userName}>
+                      {item.username}
+                    </Text>
+
+                    <Text style={styles.userEmail}>
+                      {item.email}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.checkCircle,
+                      selected &&
+                        styles.checkCircleSelected,
+                    ]}
+                  >
+                    <Text style={styles.checkText}>
+                      {selected ? "✓" : "+"}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            }}
+          />
+
+          <TouchableOpacity
+            style={[
+              styles.button,
+              styles.createGroupButton,
+            ]}
+            onPress={createGroup}
+            disabled={loading}
+          >
+            <Text style={styles.buttonText}>
+              {loading
+                ? "Vytvářím skupinu..."
+                : `Vytvořit skupinu${
+                    selectedUsers.length > 0
+                      ? ` (${selectedUsers.length})`
+                      : ""
+                  }`}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* CHAT */}
       {screen === "chat" && currentChat && (
         <KeyboardAvoidingView
@@ -729,13 +1040,27 @@ export default function App() {
               </Text>
             </TouchableOpacity>
 
+            <View style={styles.chatHeaderAvatar}>
+              <Text style={styles.chatHeaderAvatarText}>
+                {currentChat.type === "group"
+                  ? "👥"
+                  : currentChat.user?.username
+                      ?.charAt(0)
+                      .toUpperCase()}
+              </Text>
+            </View>
+
             <View style={styles.chatHeaderInfo}>
               <Text style={styles.chatHeaderName}>
-                {currentChat.user.username}
+                {currentChat.type === "group"
+                  ? currentChat.name || "Skupina"
+                  : currentChat.user?.username || "Chat"}
               </Text>
 
               <Text style={styles.chatHeaderStatus}>
-                online chat
+                {currentChat.type === "group"
+                  ? "skupinový chat"
+                  : "online chat"}
               </Text>
             </View>
           </View>
@@ -750,7 +1075,9 @@ export default function App() {
             <FlatList
               style={styles.messageList}
               data={messages}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item) =>
+                String(item.id)
+              }
               contentContainerStyle={{
                 padding: 15,
                 flexGrow: 1,
@@ -781,6 +1108,14 @@ export default function App() {
                           : styles.otherBubble,
                       ]}
                     >
+                      {currentChat.type === "group" &&
+                        !mine &&
+                        item.senderUsername && (
+                          <Text style={styles.senderName}>
+                            {item.senderUsername}
+                          </Text>
+                        )}
+
                       <Text
                         style={[
                           styles.messageText,
@@ -938,6 +1273,11 @@ const styles = StyleSheet.create({
     marginBottom: 5,
   },
 
+  newButtonsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+
   newChatButton: {
     backgroundColor: "#1677ff",
     borderRadius: 12,
@@ -945,9 +1285,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
+  newButtonHalf: {
+    flex: 1,
+  },
+
+  groupButton: {
+    flex: 1,
+    backgroundColor: "#28527d",
+  },
+
   newChatText: {
     color: "#ffffff",
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: "700",
   },
 
@@ -996,16 +1345,30 @@ const styles = StyleSheet.create({
     marginRight: 13,
   },
 
+  groupAvatar: {
+    backgroundColor: "#28527d",
+  },
+
   avatarText: {
     color: "#ffffff",
     fontSize: 20,
     fontWeight: "800",
   },
 
+  chatItemInfo: {
+    flex: 1,
+  },
+
   chatName: {
     color: "#ffffff",
     fontSize: 17,
     fontWeight: "700",
+  },
+
+  groupLabel: {
+    color: "#718398",
+    fontSize: 13,
+    marginTop: 3,
   },
 
   topRow: {
@@ -1033,13 +1396,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 15,
     fontSize: 16,
-    marginBottom: 15,
+    marginBottom: 12,
   },
 
   searchStatus: {
     color: "#8997a8",
     textAlign: "center",
     marginTop: 15,
+    marginBottom: 10,
   },
 
   userItem: {
@@ -1049,6 +1413,15 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 13,
     marginBottom: 10,
+  },
+
+  userItemSelected: {
+    borderWidth: 1,
+    borderColor: "#1677ff",
+  },
+
+  userInfoFlex: {
+    flex: 1,
   },
 
   userName: {
@@ -1061,6 +1434,73 @@ const styles = StyleSheet.create({
     color: "#8997a8",
     fontSize: 13,
     marginTop: 3,
+  },
+
+  selectedBox: {
+    backgroundColor: "#0c1928",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+
+  selectedTitle: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+
+  selectedUser: {
+    alignItems: "center",
+    width: 65,
+    marginRight: 8,
+  },
+
+  smallAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#1677ff",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  smallAvatarText: {
+    color: "#ffffff",
+    fontWeight: "800",
+  },
+
+  selectedUserName: {
+    color: "#ffffff",
+    fontSize: 11,
+    marginTop: 4,
+    maxWidth: 65,
+  },
+
+  checkCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#45576b",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  checkCircleSelected: {
+    backgroundColor: "#1677ff",
+    borderColor: "#1677ff",
+  },
+
+  checkText: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "800",
+  },
+
+  createGroupButton: {
+    marginTop: 8,
+    marginBottom: 5,
   },
 
   chatScreen: {
@@ -1076,8 +1516,26 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
 
+  chatHeaderAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#1677ff",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 0,
+    marginRight: 10,
+  },
+
+  chatHeaderAvatarText: {
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "800",
+  },
+
   chatHeaderInfo: {
     marginLeft: 3,
+    flex: 1,
   },
 
   chatHeaderName: {
@@ -1090,6 +1548,13 @@ const styles = StyleSheet.create({
     color: "#667789",
     fontSize: 12,
     marginTop: 2,
+  },
+
+  senderName: {
+    color: "#66a9ff",
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 3,
   },
 
   messageList: {
