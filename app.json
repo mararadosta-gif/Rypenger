@@ -2,11 +2,12 @@
   "expo": {
     "name": "Rypenger",
     "slug": "rypenger",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
-      "package": "com.mara.rypenger"
+      "package": "com.mara.rypenger",
+      "versionCode": 2
     },
     "extra": {
       "eas": {
