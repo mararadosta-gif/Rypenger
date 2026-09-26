@@ -8,6 +8,9 @@ import {
   StyleSheet,
   StatusBar,
   Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -24,6 +27,17 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [checkingLogin, setCheckingLogin] = useState(true);
   const [user, setUser] = useState(null);
+
+  const [search, setSearch] = useState("");
+  const [users, setUsers] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  const [conversations, setConversations] = useState([]);
+  const [currentChat, setCurrentChat] = useState(null);
+
+  const [messages, setMessages] = useState([]);
+  const [messageText, setMessageText] = useState("");
+  const [messagesLoading, setMessagesLoading] = useState(false);
 
   // AUTOMATICKÉ PŘIHLÁŠENÍ
   useEffect(() => {
@@ -50,6 +64,7 @@ export default function App() {
       if (response.ok && data.user) {
         setUser(data.user);
         setScreen("chats");
+        loadConversations(token);
       } else {
         await AsyncStorage.removeItem(TOKEN_KEY);
       }
@@ -154,6 +169,8 @@ export default function App() {
       setEmail("");
       setPassword("");
       setScreen("chats");
+
+      loadConversations(data.token);
     } catch (error) {
       Alert.alert(
         "Chyba připojení",
@@ -164,6 +181,206 @@ export default function App() {
     }
   };
 
+  // NAČTENÍ CHATŮ
+  const loadConversations = async (savedToken = null) => {
+    try {
+      const token =
+        savedToken ||
+        (await AsyncStorage.getItem(TOKEN_KEY));
+
+      if (!token) return;
+
+      const response = await fetch(
+        `${API_URL}/conversations`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setConversations(data.conversations || []);
+      }
+    } catch (error) {
+      console.log("Načítání chatů:", error);
+    }
+  };
+
+  // VYHLEDÁNÍ UŽIVATELŮ
+  const searchUsers = async (text) => {
+    setSearch(text);
+
+    if (text.trim().length < 2) {
+      setUsers([]);
+      return;
+    }
+
+    setSearchLoading(true);
+
+    try {
+      const token = await AsyncStorage.getItem(TOKEN_KEY);
+
+      const response = await fetch(
+        `${API_URL}/users/search?q=${encodeURIComponent(
+          text.trim()
+        )}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setUsers(data.users || []);
+      } else {
+        setUsers([]);
+      }
+    } catch (error) {
+      console.log("Hledání uživatelů:", error);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  // OTEVŘENÍ / VYTVOŘENÍ CHATU
+  const openChatWithUser = async (selectedUser) => {
+    try {
+      const token = await AsyncStorage.getItem(TOKEN_KEY);
+
+      const response = await fetch(
+        `${API_URL}/conversations`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            userId: selectedUser.id,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        Alert.alert(
+          "Chyba",
+          data.error || "Chat se nepodařilo vytvořit."
+        );
+        return;
+      }
+
+      const chat = {
+        id: data.conversation.id,
+        user: data.conversation.user,
+      };
+
+      setCurrentChat(chat);
+      setSearch("");
+      setUsers([]);
+      setMessages([]);
+      setScreen("chat");
+
+      loadMessages(chat.id);
+      loadConversations(token);
+    } catch (error) {
+      Alert.alert(
+        "Chyba připojení",
+        "Nepodařilo se spojit se serverem."
+      );
+    }
+  };
+
+  // OTEVŘENÍ EXISTUJÍCÍHO CHATU
+  const openExistingChat = (chat) => {
+    setCurrentChat(chat);
+    setMessages([]);
+    setScreen("chat");
+    loadMessages(chat.id);
+  };
+
+  // NAČTENÍ ZPRÁV
+  const loadMessages = async (conversationId) => {
+    setMessagesLoading(true);
+
+    try {
+      const token = await AsyncStorage.getItem(TOKEN_KEY);
+
+      const response = await fetch(
+        `${API_URL}/conversations/${conversationId}/messages`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setMessages(data.messages || []);
+      }
+    } catch (error) {
+      console.log("Načítání zpráv:", error);
+    } finally {
+      setMessagesLoading(false);
+    }
+  };
+
+  // ODESLÁNÍ ZPRÁVY
+  const sendMessage = async () => {
+    const text = messageText.trim();
+
+    if (!text || !currentChat) return;
+
+    try {
+      const token = await AsyncStorage.getItem(TOKEN_KEY);
+
+      const response = await fetch(
+        `${API_URL}/conversations/${currentChat.id}/messages`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            message: text,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        Alert.alert(
+          "Chyba",
+          data.error || "Zprávu se nepodařilo odeslat."
+        );
+        return;
+      }
+
+      setMessages((oldMessages) => [
+        ...oldMessages,
+        data.message,
+      ]);
+
+      setMessageText("");
+    } catch (error) {
+      Alert.alert(
+        "Chyba připojení",
+        "Nepodařilo se odeslat zprávu."
+      );
+    }
+  };
+
   // ODHLÁŠENÍ
   const logout = async () => {
     await AsyncStorage.removeItem(TOKEN_KEY);
@@ -171,6 +388,9 @@ export default function App() {
     setUser(null);
     setEmail("");
     setPassword("");
+    setConversations([]);
+    setCurrentChat(null);
+    setMessages([]);
     setScreen("welcome");
   };
 
@@ -182,6 +402,7 @@ export default function App() {
 
         <View style={styles.center}>
           <Text style={styles.logo}>RYPENGER</Text>
+
           <Text style={styles.loadingText}>
             Přihlašuji...
           </Text>
@@ -328,36 +549,75 @@ export default function App() {
         </View>
       )}
 
-      {/* CHATS */}
+      {/* CHAT LIST */}
       {screen === "chats" && (
         <View style={styles.chats}>
-          <Text style={styles.title}>
-            Rypenger
-          </Text>
-
-          {user && (
-            <Text style={styles.loggedUser}>
-              Přihlášen jako: {user.username}
-            </Text>
-          )}
-
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>
-              Žádné chaty
-            </Text>
-
-            <Text style={styles.emptyText}>
-              Tady se později objeví tvoje konverzace.
-            </Text>
-
-            <TouchableOpacity
-              style={styles.button}
-            >
-              <Text style={styles.buttonText}>
-                + Nový chat
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.title}>
+                Rypenger
               </Text>
-            </TouchableOpacity>
+
+              {user && (
+                <Text style={styles.loggedUser}>
+                  @{user.username}
+                </Text>
+              )}
+            </View>
           </View>
+
+          <TouchableOpacity
+            style={styles.newChatButton}
+            onPress={() => {
+              setSearch("");
+              setUsers([]);
+              setScreen("newChat");
+            }}
+          >
+            <Text style={styles.newChatText}>
+              + Nový chat
+            </Text>
+          </TouchableOpacity>
+
+          {conversations.length === 0 ? (
+            <View style={styles.empty}>
+              <Text style={styles.emptyTitle}>
+                Žádné chaty
+              </Text>
+
+              <Text style={styles.emptyText}>
+                Založ první konverzaci.
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={conversations}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{
+                paddingTop: 15,
+              }}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.chatItem}
+                  onPress={() =>
+                    openExistingChat(item)
+                  }
+                >
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>
+                      {item.user.username
+                        .charAt(0)
+                        .toUpperCase()}
+                    </Text>
+                  </View>
+
+                  <Text style={styles.chatName}>
+                    {item.user.username}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          )}
 
           <TouchableOpacity onPress={logout}>
             <Text style={styles.logout}>
@@ -366,135 +626,185 @@ export default function App() {
           </TouchableOpacity>
         </View>
       )}
-    </SafeAreaView>
-  );
-}
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#07111f",
-  },
+      {/* NOVÝ CHAT */}
+      {screen === "newChat" && (
+        <View style={styles.chats}>
+          <View style={styles.topRow}>
+            <TouchableOpacity
+              onPress={() => {
+                setSearch("");
+                setUsers([]);
+                setScreen("chats");
+              }}
+            >
+              <Text style={styles.backButton}>
+                ←
+              </Text>
+            </TouchableOpacity>
 
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 25,
-  },
+            <Text style={styles.topTitle}>
+              Nový chat
+            </Text>
+          </View>
 
-  logo: {
-    fontSize: 42,
-    fontWeight: "900",
-    color: "#ffffff",
-    letterSpacing: 2,
-  },
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Hledat uživatele..."
+            placeholderTextColor="#777"
+            value={search}
+            onChangeText={searchUsers}
+            autoCapitalize="none"
+            autoFocus
+          />
 
-  subtitle: {
-    color: "#9aa8b8",
-    fontSize: 16,
-    textAlign: "center",
-    marginTop: 12,
-    marginBottom: 35,
-  },
+          {searchLoading && (
+            <Text style={styles.searchStatus}>
+              Hledám...
+            </Text>
+          )}
 
-  loadingText: {
-    color: "#8997a8",
-    fontSize: 16,
-    marginTop: 15,
-  },
+          {!searchLoading &&
+            search.length >= 2 &&
+            users.length === 0 && (
+              <Text style={styles.searchStatus}>
+                Žádný uživatel nenalezen.
+              </Text>
+            )}
 
-  form: {
-    flex: 1,
-    justifyContent: "center",
-    padding: 25,
-  },
+          <FlatList
+            data={users}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.userItem}
+                onPress={() =>
+                  openChatWithUser(item)
+                }
+              >
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {item.username
+                      .charAt(0)
+                      .toUpperCase()}
+                  </Text>
+                </View>
 
-  title: {
-    color: "#ffffff",
-    fontSize: 30,
-    fontWeight: "800",
-    marginBottom: 25,
-  },
+                <View>
+                  <Text style={styles.userName}>
+                    {item.username}
+                  </Text>
 
-  input: {
-    backgroundColor: "#111e2d",
-    color: "#ffffff",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 15,
-    fontSize: 16,
-    marginBottom: 12,
-  },
+                  <Text style={styles.userEmail}>
+                    {item.email}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      )}
 
-  button: {
-    backgroundColor: "#1677ff",
-    borderRadius: 12,
-    paddingVertical: 15,
-    paddingHorizontal: 25,
-    alignItems: "center",
-    marginTop: 10,
-    width: "100%",
-  },
+      {/* CHAT */}
+      {screen === "chat" && currentChat && (
+        <KeyboardAvoidingView
+          style={styles.chatScreen}
+          behavior={
+            Platform.OS === "ios"
+              ? "padding"
+              : undefined
+          }
+        >
+          <View style={styles.chatHeader}>
+            <TouchableOpacity
+              onPress={() => {
+                setCurrentChat(null);
+                setMessages([]);
+                setScreen("chats");
+                loadConversations();
+              }}
+            >
+              <Text style={styles.backButton}>
+                ←
+              </Text>
+            </TouchableOpacity>
 
-  buttonText: {
-    color: "#ffffff",
-    fontSize: 17,
-    fontWeight: "700",
-  },
+            <View style={styles.chatHeaderInfo}>
+              <Text style={styles.chatHeaderName}>
+                {currentChat.user.username}
+              </Text>
 
-  secondaryButton: {
-    paddingVertical: 15,
-    paddingHorizontal: 25,
-    marginTop: 8,
-  },
+              <Text style={styles.chatHeaderStatus}>
+                online chat
+              </Text>
+            </View>
+          </View>
 
-  secondaryText: {
-    color: "#4d9aff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
+          {messagesLoading ? (
+            <View style={styles.center}>
+              <Text style={styles.loadingText}>
+                Načítám zprávy...
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              style={styles.messageList}
+              data={messages}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{
+                padding: 15,
+                flexGrow: 1,
+                justifyContent:
+                  messages.length === 0
+                    ? "center"
+                    : "flex-end",
+              }}
+              renderItem={({ item }) => {
+                const mine =
+                  String(item.senderId) ===
+                  String(user?.id);
 
-  back: {
-    color: "#4d9aff",
-    textAlign: "center",
-    marginTop: 20,
-    fontSize: 16,
-  },
+                return (
+                  <View
+                    style={[
+                      styles.messageRow,
+                      mine
+                        ? styles.messageRowMine
+                        : styles.messageRowOther,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.messageBubble,
+                        mine
+                          ? styles.myBubble
+                          : styles.otherBubble,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.messageText,
+                          mine
+                            ? styles.myMessageText
+                            : styles.otherMessageText,
+                        ]}
+                      >
+                        {item.message}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              }}
+              ListEmptyComponent={
+                <Text style={styles.emptyChatText}>
+                  Zatím tu není žádná zpráva.
+                  {"\n"}
+                  Napiš něco 😏
+                </Text>
+              }
+            />
+          )}
 
-  chats: {
-    flex: 1,
-    padding: 20,
-  },
-
-  loggedUser: {
-    color: "#8997a8",
-    fontSize: 15,
-  },
-
-  empty: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  emptyTitle: {
-    color: "#ffffff",
-    fontSize: 23,
-    fontWeight: "700",
-  },
-
-  emptyText: {
-    color: "#8997a8",
-    textAlign: "center",
-    marginTop: 8,
-    marginBottom: 20,
-  },
-
-  logout: {
-    color: "#ff5c5c",
-    textAlign: "center",
-    fontSize: 16,
-    marginBottom: 15,
-  },
-});
+          <View style={styles.messageInputRow}>
+            <TextInput
+              style={styles.
