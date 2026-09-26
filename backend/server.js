@@ -41,9 +41,15 @@ async function initDatabase() {
       id BIGSERIAL PRIMARY KEY,
       user_one BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       user_two BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(user_one, user_two)
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+
+  // Starý UNIQUE(user_one, user_two) by blokoval
+  // vytvoření více skupin stejným uživatelem.
+  await pool.query(`
+    ALTER TABLE conversations
+    DROP CONSTRAINT IF EXISTS conversations_user_one_user_two_key
   `);
 
   await pool.query(`
@@ -54,6 +60,18 @@ async function initDatabase() {
   await pool.query(`
     ALTER TABLE conversations
     ADD COLUMN IF NOT EXISTS name VARCHAR(100)
+  `);
+
+  // Unikátní jsou pouze soukromé 1:1 chaty.
+  // Skupiny mohou být libovolné.
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS
+    conversations_private_pair_unique
+    ON conversations (
+      LEAST(user_one, user_two),
+      GREATEST(user_one, user_two)
+    )
+    WHERE type = 'private'
   `);
 
   await pool.query(`
@@ -485,6 +503,7 @@ app.post(
         FROM conversations
         WHERE user_one = $1
         AND user_two = $2
+        AND type = 'private'
         `,
         [firstId, secondId]
       );
@@ -555,6 +574,7 @@ app.post(
 
     try {
       const name = (req.body.name || "").trim();
+
       const memberIds = Array.isArray(req.body.memberIds)
         ? req.body.memberIds
         : [];
@@ -575,7 +595,11 @@ app.post(
         Number(req.user.id),
         ...memberIds
           .map(Number)
-          .filter(id => id && id !== Number(req.user.id))
+          .filter(
+            id =>
+              id &&
+              id !== Number(req.user.id)
+          )
       ];
 
       const uniqueMemberIds = [
@@ -602,15 +626,16 @@ app.post(
         uniqueMemberIds.length
       ) {
         return res.status(400).json({
-          error: "Některý z vybraných uživatelů neexistuje."
+          error:
+            "Některý z vybraných uživatelů neexistuje."
         });
       }
 
       await client.query("BEGIN");
 
-      // Pro skupinu používáme user_one = zakladatel
-      // a user_two = zakladatel, protože členové
-      // jsou uloženi v conversation_members.
+      // Každá skupina dostane vlastní conversation ID.
+      // Díky odstranění starého UNIQUE(user_one,user_two)
+      // může jeden uživatel vytvořit neomezeně skupin.
       const conversationResult = await client.query(
         `
         INSERT INTO conversations
@@ -958,13 +983,16 @@ app.get(
       const result = await pool.query(
         `
         SELECT
-          id,
-          sender_id,
-          message,
-          created_at
-        FROM messages
-        WHERE conversation_id = $1
-        ORDER BY created_at ASC, id ASC
+          m.id,
+          m.sender_id,
+          m.message,
+          m.created_at,
+          u.username AS sender_username
+        FROM messages m
+        JOIN users u
+          ON u.id = m.sender_id
+        WHERE m.conversation_id = $1
+        ORDER BY m.created_at ASC, m.id ASC
         `,
         [conversationId]
       );
@@ -974,6 +1002,8 @@ app.get(
           id: msg.id.toString(),
           senderId:
             msg.sender_id.toString(),
+          senderUsername:
+            msg.sender_username,
           message: msg.message,
           createdAt: msg.created_at
         }))
