@@ -7,6 +7,11 @@
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.mara.rypenger"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "453f43bc-7fc3-4ccc-b511-b369cf9e8a04"
+      }
     }
   }
 }
