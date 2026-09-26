@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { Pool } = require("pg");
 
 const app = express();
 
@@ -9,12 +10,33 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || "rypenger-dev-secret";
 
-// Dočasná databáze
-const users = [];
+const JWT_SECRET =
+  process.env.JWT_SECRET || "rypenger-dev-secret";
 
-// TEST
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
+
+// Vytvoření tabulky uživatelů
+async function initDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id BIGSERIAL PRIMARY KEY,
+      username VARCHAR(50) NOT NULL UNIQUE,
+      email VARCHAR(255) NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  console.log("PostgreSQL databáze připravena.");
+}
+
+// TEST SERVERU
 app.get("/", (req, res) => {
   res.json({
     app: "Rypenger",
@@ -34,31 +56,38 @@ app.post("/register", async (req, res) => {
       });
     }
 
+    const cleanUsername = username.trim();
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (cleanUsername.length < 3) {
+      return res.status(400).json({
+        error: "Uživatelské jméno musí mít alespoň 3 znaky."
+      });
+    }
+
     if (password.length < 6) {
       return res.status(400).json({
         error: "Heslo musí mít alespoň 6 znaků."
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
-
-    const existingUser = users.find(
-      user => user.email === normalizedEmail
+    const existingEmail = await pool.query(
+      "SELECT id FROM users WHERE email = $1",
+      [normalizedEmail]
     );
 
-    if (existingUser) {
+    if (existingEmail.rows.length > 0) {
       return res.status(409).json({
         error: "Tento e-mail už je registrovaný."
       });
     }
 
-    const existingUsername = users.find(
-      user =>
-        user.username.toLowerCase() ===
-        username.trim().toLowerCase()
+    const existingUsername = await pool.query(
+      "SELECT id FROM users WHERE LOWER(username) = LOWER($1)",
+      [cleanUsername]
     );
 
-    if (existingUsername) {
+    if (existingUsername.rows.length > 0) {
       return res.status(409).json({
         error: "Toto uživatelské jméno už existuje."
       });
@@ -66,14 +95,21 @@ app.post("/register", async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 10);
 
-    const user = {
-      id: Date.now().toString(),
-      username: username.trim(),
-      email: normalizedEmail,
-      passwordHash
-    };
+    const result = await pool.query(
+      `
+      INSERT INTO users
+      (username, email, password_hash)
+      VALUES ($1, $2, $3)
+      RETURNING id, username, email
+      `,
+      [
+        cleanUsername,
+        normalizedEmail,
+        passwordHash
+      ]
+    );
 
-    users.push(user);
+    const user = result.rows[0];
 
     const token = jwt.sign(
       {
@@ -90,17 +126,17 @@ app.post("/register", async (req, res) => {
       message: "Účet byl vytvořen.",
       token,
       user: {
-        id: user.id,
+        id: user.id.toString(),
         username: user.username,
         email: user.email
       }
     });
 
   } catch (error) {
-    console.error(error);
+    console.error("REGISTRATION ERROR:", error);
 
     res.status(500).json({
-      error: "Chyba serveru."
+      error: "Chyba serveru při registraci."
     });
   }
 });
@@ -118,19 +154,26 @@ app.post("/login", async (req, res) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    const user = users.find(
-      user => user.email === normalizedEmail
+    const result = await pool.query(
+      `
+      SELECT id, username, email, password_hash
+      FROM users
+      WHERE email = $1
+      `,
+      [normalizedEmail]
     );
 
-    if (!user) {
+    if (result.rows.length === 0) {
       return res.status(401).json({
         error: "Nesprávný e-mail nebo heslo."
       });
     }
 
+    const user = result.rows[0];
+
     const passwordCorrect = await bcrypt.compare(
       password,
-      user.passwordHash
+      user.password_hash
     );
 
     if (!passwordCorrect) {
@@ -154,17 +197,17 @@ app.post("/login", async (req, res) => {
       message: "Přihlášení proběhlo úspěšně.",
       token,
       user: {
-        id: user.id,
+        id: user.id.toString(),
         username: user.username,
         email: user.email
       }
     });
 
   } catch (error) {
-    console.error(error);
+    console.error("LOGIN ERROR:", error);
 
     res.status(500).json({
-      error: "Chyba serveru."
+      error: "Chyba serveru při přihlášení."
     });
   }
 });
@@ -195,27 +238,61 @@ function authenticateToken(req, res, next) {
 }
 
 // PROFIL
-app.get("/me", authenticateToken, (req, res) => {
-  const user = users.find(
-    user => user.id === req.user.id
-  );
+app.get("/me", authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT id, username, email
+      FROM users
+      WHERE id = $1
+      `,
+      [req.user.id]
+    );
 
-  if (!user) {
-    return res.status(404).json({
-      error: "Uživatel nebyl nalezen."
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: "Uživatel nebyl nalezen."
+      });
+    }
+
+    const user = result.rows[0];
+
+    res.json({
+      user: {
+        id: user.id.toString(),
+        username: user.username,
+        email: user.email
+      }
+    });
+
+  } catch (error) {
+    console.error("PROFILE ERROR:", error);
+
+    res.status(500).json({
+      error: "Chyba serveru."
     });
   }
-
-  res.json({
-    user: {
-      id: user.id,
-      username: user.username,
-      email: user.email
-    }
-  });
 });
 
-// START
-app.listen(PORT, () => {
-  console.log(`Rypenger backend běží na portu ${PORT}`);
-});
+// START SERVERU
+async function startServer() {
+  try {
+    await initDatabase();
+
+    app.listen(PORT, () => {
+      console.log(
+        `Rypenger backend běží na portu ${PORT}`
+      );
+    });
+
+  } catch (error) {
+    console.error(
+      "Nepodařilo se připojit k PostgreSQL:",
+      error
+    );
+
+    process.exit(1);
+  }
+}
+
+startServer();
