@@ -340,6 +340,7 @@ async function sendPushNotifications(
       tokens.map(item => ({
         to: item.token,
         sound: "default",
+        channelId: "default",
         title,
         body,
         data: {
