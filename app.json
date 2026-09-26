@@ -7,7 +7,7 @@
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.mara.rypenger",
-      "versionCode": 4
+      "versionCode": 5
     },
     "extra": {
       "eas": {
