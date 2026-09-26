@@ -278,8 +278,6 @@ function imageSizeOk(image) {
     return false;
   }
 
-  // Přibližná kontrola velikosti Base64 dat.
-  // Limit je přibližně 10 MB na jeden obrázek.
   const base64Part =
     image.split(",")[1] || "";
 
@@ -289,6 +287,123 @@ function imageSizeOk(image) {
     );
 
   return estimatedBytes <= 10 * 1024 * 1024;
+}
+
+// =========================
+// PUSH NOTIFIKACE
+// =========================
+
+async function sendPushNotifications(
+  conversationId,
+  senderId,
+  title,
+  body
+) {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        u.id,
+        u.push_token
+      FROM conversation_members cm
+
+      JOIN users u
+        ON u.id = cm.user_id
+
+      WHERE cm.conversation_id = $1
+      AND u.id != $2
+      AND u.push_token IS NOT NULL
+      AND u.push_token != ''
+      `,
+      [
+        conversationId,
+        senderId
+      ]
+    );
+
+    const tokens =
+      result.rows
+        .map(row => ({
+          id: row.id,
+          token: row.push_token
+        }))
+        .filter(item =>
+          /^(Expo|Exponent)PushToken\[[^\]]+\]$/
+            .test(item.token)
+        );
+
+    if (tokens.length === 0) {
+      return;
+    }
+
+    const messages =
+      tokens.map(item => ({
+        to: item.token,
+        sound: "default",
+        title,
+        body,
+        data: {
+          conversationId:
+            conversationId.toString()
+        }
+      }));
+
+    const response = await fetch(
+      "https://exp.host/--/api/v2/push/send",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+        body:
+          JSON.stringify(messages)
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (!response.ok) {
+      console.error(
+        "EXPO PUSH ERROR:",
+        data
+      );
+      return;
+    }
+
+    if (Array.isArray(data.data)) {
+      for (
+        let i = 0;
+        i < data.data.length;
+        i++
+      ) {
+        const ticket =
+          data.data[i];
+
+        if (
+          ticket?.status === "error" &&
+          ticket?.details?.error ===
+            "DeviceNotRegistered"
+        ) {
+          await pool.query(
+            `
+            UPDATE users
+            SET push_token = NULL
+            WHERE id = $1
+            `,
+            [tokens[i].id]
+          );
+        }
+      }
+    }
+
+  } catch (error) {
+    console.error(
+      "PUSH NOTIFICATION ERROR:",
+      error
+    );
+  }
 }
 
 // =========================
@@ -311,11 +426,14 @@ async function initDatabase() {
     ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP
   `);
 
-  // NOVÉ:
-  // Profilová fotografie uživatele.
   await pool.query(`
     ALTER TABLE users
     ADD COLUMN IF NOT EXISTS avatar TEXT
+  `);
+
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS push_token TEXT
   `);
 
   await pool.query(`
@@ -416,8 +534,6 @@ async function initDatabase() {
     )
   `);
 
-  // NOVÉ:
-  // Obrázek připojený ke zprávě.
   await pool.query(`
     ALTER TABLE messages
     ADD COLUMN IF NOT EXISTS image TEXT
@@ -896,6 +1012,68 @@ app.get(
       res.status(500).json({
         error:
           "Chyba serveru."
+      });
+    }
+  }
+);
+
+// =========================
+// PUSH TOKEN
+// =========================
+
+app.patch(
+  "/me/push-token",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const pushToken =
+        (
+          req.body.pushToken ||
+          ""
+        ).trim();
+
+      if (!pushToken) {
+        return res.status(400).json({
+          error:
+            "Chybí push token."
+        });
+      }
+
+      if (
+        !/^(Expo|Exponent)PushToken\[[^\]]+\]$/
+          .test(pushToken)
+      ) {
+        return res.status(400).json({
+          error:
+            "Neplatný Expo push token."
+        });
+      }
+
+      await pool.query(
+        `
+        UPDATE users
+        SET push_token = $1
+        WHERE id = $2
+        `,
+        [
+          pushToken,
+          req.user.id
+        ]
+      );
+
+      res.json({
+        success: true
+      });
+
+    } catch (error) {
+      console.error(
+        "PUSH TOKEN ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Push token se nepodařilo uložit."
       });
     }
   }
@@ -2155,7 +2333,6 @@ app.post(
       const image =
         req.body.image || null;
 
-      // Musí být buď text, nebo obrázek.
       if (!message && !image) {
         return res.status(400).json({
           error:
@@ -2163,7 +2340,6 @@ app.post(
         });
       }
 
-      // Kontrola obrázku.
       if (image) {
         if (!isValidImageData(image)) {
           return res.status(400).json({
@@ -2263,6 +2439,22 @@ app.post(
           newMessage.created_at
       };
 
+      // =========================
+      // PUSH OSTATNÍM ČLENŮM
+      // =========================
+
+      const notificationBody =
+        image && !message
+          ? "📷 Nová fotka"
+          : message;
+
+      await sendPushNotifications(
+        conversationId,
+        req.user.id,
+        req.user.username,
+        notificationBody
+      );
+
       let rypMessage = null;
 
       // Rýp reaguje pouze na textovou zprávu
@@ -2278,6 +2470,19 @@ app.post(
             conversationId,
             message
           );
+
+        // =========================
+        // PUSH RÝPOVY ODPOVĚDI
+        // =========================
+
+        if (rypMessage) {
+          await sendPushNotifications(
+            conversationId,
+            rypMessage.senderId,
+            "Rýp",
+            rypMessage.message
+          );
+        }
       }
 
       res.status(201).json({
