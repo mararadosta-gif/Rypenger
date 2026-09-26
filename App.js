@@ -28,28 +28,29 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
+  const [loading, setLoading] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+
   const [conversations, setConversations] = useState([]);
   const [currentChat, setCurrentChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [messageText, setMessageText] = useState("");
 
-  const [users, setUsers] = useState([]);
   const [searchText, setSearchText] = useState("");
+  const [users, setUsers] = useState([]);
 
   const [groupName, setGroupName] = useState("");
   const [selectedUsers, setSelectedUsers] = useState([]);
 
-  const [loading, setLoading] = useState(false);
-  const [messagesLoading, setMessagesLoading] = useState(false);
-
   const [groupInfo, setGroupInfo] = useState(null);
+
   const [membersVisible, setMembersVisible] = useState(false);
   const [renameVisible, setRenameVisible] = useState(false);
   const [renameText, setRenameText] = useState("");
 
-  // --------------------------------------------------
+  // ==================================================
   // API
-  // --------------------------------------------------
+  // ==================================================
 
   const api = async (path, options = {}) => {
     const savedToken =
@@ -78,15 +79,17 @@ export default function App() {
     }
 
     if (!response.ok) {
-      throw new Error(data.error || "Něco se pokazilo.");
+      throw new Error(
+        data.error || "Něco se pokazilo."
+      );
     }
 
     return data;
   };
 
-  // --------------------------------------------------
-  // START
-  // --------------------------------------------------
+  // ==================================================
+  // START / LOGIN CHECK
+  // ==================================================
 
   useEffect(() => {
     checkLogin();
@@ -94,20 +97,26 @@ export default function App() {
 
   const checkLogin = async () => {
     try {
-      const savedToken = await AsyncStorage.getItem(TOKEN_KEY);
+      const savedToken =
+        await AsyncStorage.getItem(TOKEN_KEY);
 
       if (!savedToken) {
         setScreen("welcome");
         return;
       }
 
-      const data = await fetch(`${API_URL}/me`, {
-        headers: {
-          Authorization: `Bearer ${savedToken}`,
-        },
-      }).then((r) => r.json());
+      const response = await fetch(
+        `${API_URL}/me`,
+        {
+          headers: {
+            Authorization: `Bearer ${savedToken}`,
+          },
+        }
+      );
 
-      if (!data.user) {
+      const data = await response.json();
+
+      if (!response.ok || !data.user) {
         await AsyncStorage.removeItem(TOKEN_KEY);
         setScreen("welcome");
         return;
@@ -116,53 +125,28 @@ export default function App() {
       setToken(savedToken);
       setMe(data.user);
       setScreen("chats");
+
       loadConversations(savedToken);
-    } catch {
+    } catch (error) {
+      console.log("Kontrola přihlášení:", error);
       setScreen("welcome");
     }
   };
 
-  // --------------------------------------------------
-  // AUTH
-  // --------------------------------------------------
-
-  const login = async () => {
-    if (!email.trim() || !password) {
-      Alert.alert("Rypenger", "Vyplň email a heslo.");
-      return;
-    }
-
-    try {
-      setLoading(true);
-
-      const data = await api("/login", {
-        method: "POST",
-        body: JSON.stringify({
-          email: email.trim(),
-          password,
-        }),
-      });
-
-      await AsyncStorage.setItem(TOKEN_KEY, data.token);
-
-      setToken(data.token);
-      setMe(data.user);
-
-      setEmail("");
-      setPassword("");
-
-      setScreen("chats");
-      loadConversations(data.token);
-    } catch (error) {
-      Alert.alert("Přihlášení", error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // ==================================================
+  // REGISTRACE
+  // ==================================================
 
   const register = async () => {
-    if (!username.trim() || !email.trim() || !password) {
-      Alert.alert("Rypenger", "Vyplň všechna pole.");
+    if (
+      !username.trim() ||
+      !email.trim() ||
+      !password
+    ) {
+      Alert.alert(
+        "Rypenger",
+        "Vyplň všechna pole."
+      );
       return;
     }
 
@@ -186,7 +170,10 @@ export default function App() {
         }),
       });
 
-      await AsyncStorage.setItem(TOKEN_KEY, data.token);
+      await AsyncStorage.setItem(
+        TOKEN_KEY,
+        data.token
+      );
 
       setToken(data.token);
       setMe(data.user);
@@ -196,13 +183,69 @@ export default function App() {
       setPassword("");
 
       setScreen("chats");
+
       loadConversations(data.token);
     } catch (error) {
-      Alert.alert("Registrace", error.message);
+      Alert.alert(
+        "Registrace",
+        error.message
+      );
     } finally {
       setLoading(false);
     }
   };
+
+  // ==================================================
+  // PŘIHLÁŠENÍ
+  // ==================================================
+
+  const login = async () => {
+    if (!email.trim() || !password) {
+      Alert.alert(
+        "Přihlášení",
+        "Vyplň email a heslo."
+      );
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const data = await api("/login", {
+        method: "POST",
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+        }),
+      });
+
+      await AsyncStorage.setItem(
+        TOKEN_KEY,
+        data.token
+      );
+
+      setToken(data.token);
+      setMe(data.user);
+
+      setEmail("");
+      setPassword("");
+
+      setScreen("chats");
+
+      loadConversations(data.token);
+    } catch (error) {
+      Alert.alert(
+        "Přihlášení",
+        error.message
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================================================
+  // ODHLÁŠENÍ
+  // ==================================================
 
   const logout = async () => {
     await AsyncStorage.removeItem(TOKEN_KEY);
@@ -210,17 +253,20 @@ export default function App() {
     setToken(null);
     setMe(null);
     setConversations([]);
-    setMessages([]);
     setCurrentChat(null);
+    setMessages([]);
+    setGroupInfo(null);
 
     setScreen("welcome");
   };
 
-  // --------------------------------------------------
-  // CONVERSATIONS
-  // --------------------------------------------------
+  // ==================================================
+  // CHATY
+  // ==================================================
 
-  const loadConversations = async (customToken = null) => {
+  const loadConversations = async (
+    customToken = null
+  ) => {
     try {
       const savedToken =
         customToken ||
@@ -233,7 +279,8 @@ export default function App() {
         `${API_URL}/conversations`,
         {
           headers: {
-            Authorization: `Bearer ${savedToken}`,
+            Authorization:
+              `Bearer ${savedToken}`,
           },
         }
       );
@@ -241,125 +288,203 @@ export default function App() {
       const data = await response.json();
 
       if (response.ok) {
-        setConversations(data.conversations || []);
+        setConversations(
+          data.conversations || []
+        );
       }
-    } catch {}
+    } catch (error) {
+      console.log(
+        "Načítání chatů:",
+        error
+      );
+    }
   };
 
-  const openChat = async (conversation) => {
-    setCurrentChat(conversation);
+  // ==================================================
+  // OTEVŘENÍ CHATU
+  // ==================================================
+
+  const openChat = async (chat) => {
+    setCurrentChat(chat);
     setMessages([]);
     setGroupInfo(null);
     setScreen("chat");
 
-    await loadMessages(conversation.id);
+    await loadMessages(chat.id);
 
-    if (conversation.type === "group") {
-      await loadGroupInfo(conversation.id);
+    if (chat.type === "group") {
+      await loadGroupInfo(chat.id);
     }
   };
 
-  // --------------------------------------------------
-  // MESSAGES
-  // --------------------------------------------------
+  // ==================================================
+  // NOVÝ 1:1 CHAT
+  // ==================================================
+
+  const openChatWithUser = async (
+    selectedUser
+  ) => {
+    try {
+      setLoading(true);
+
+      const data = await api(
+        "/conversations",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            userId: selectedUser.id,
+          }),
+        }
+      );
+
+      const conversation =
+        data.conversation;
+
+      if (!conversation) {
+        throw new Error(
+          "Server nevrátil vytvořený chat."
+        );
+      }
+
+      const chat = {
+        id: conversation.id,
+        type: "private",
+        user:
+          conversation.user ||
+          selectedUser,
+      };
+
+      setSearchText("");
+      setUsers([]);
+
+      setCurrentChat(chat);
+      setMessages([]);
+      setGroupInfo(null);
+      setScreen("chat");
+
+      await loadMessages(chat.id);
+      await loadConversations();
+    } catch (error) {
+      Alert.alert(
+        "Nový chat",
+        error.message
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================================================
+  // ZPRÁVY
+  // ==================================================
 
   const loadMessages = async (
     conversationId,
     silent = false
   ) => {
     try {
-      if (!silent) setMessagesLoading(true);
+      if (!silent) {
+        setMessagesLoading(true);
+      }
 
       const data = await api(
         `/conversations/${conversationId}/messages`
       );
 
-      setMessages(data.messages || []);
+      setMessages(
+        data.messages || []
+      );
     } catch (error) {
       if (!silent) {
-        Alert.alert("Zprávy", error.message);
+        Alert.alert(
+          "Zprávy",
+          error.message
+        );
       }
     } finally {
-      if (!silent) setMessagesLoading(false);
+      if (!silent) {
+        setMessagesLoading(false);
+      }
     }
   };
 
-  const sendMessage = async () => {
-    const text = messageText.trim();
+  // ==================================================
+  // ODESLÁNÍ ZPRÁVY
+  // ==================================================
 
-    if (!text || !currentChat) return;
+  const sendMessage = async () => {
+    const text =
+      messageText.trim();
+
+    if (!text || !currentChat) {
+      return;
+    }
 
     try {
       setMessageText("");
 
-      const data = await api("/messages", {
-        method: "POST",
-        body: JSON.stringify({
-          conversationId: currentChat.id,
-          content: text,
-        }),
+      const data = await api(
+        `/conversations/${currentChat.id}/messages`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            message: text,
+          }),
+        }
+      );
+
+      setMessages((oldMessages) => {
+        const newMessages = [
+          ...oldMessages,
+        ];
+
+        if (data.message) {
+          const exists =
+            newMessages.some(
+              (item) =>
+                String(item.id) ===
+                String(data.message.id)
+            );
+
+          if (!exists) {
+            newMessages.push(
+              data.message
+            );
+          }
+        }
+
+        if (data.rypMessage) {
+          const exists =
+            newMessages.some(
+              (item) =>
+                String(item.id) ===
+                String(data.rypMessage.id)
+            );
+
+          if (!exists) {
+            newMessages.push(
+              data.rypMessage
+            );
+          }
+        }
+
+        return newMessages;
       });
-
-      if (data.message) {
-        setMessages((old) => [...old, data.message]);
-      }
-
-      // Rýp odpověď přijde rovnou do chatu
-      if (data.rypMessage) {
-        setMessages((old) => [
-          ...old,
-          data.rypMessage,
-        ]);
-      }
 
       loadConversations();
     } catch (error) {
       setMessageText(text);
-      Alert.alert("Zpráva", error.message);
+
+      Alert.alert(
+        "Zpráva",
+        error.message
+      );
     }
   };
 
-  // --------------------------------------------------
-  // DELETE MESSAGE
-  // --------------------------------------------------
-
-  const deleteMessage = (message) => {
-    if (!me || message.user_id !== me.id) return;
-
-    Alert.alert(
-      "Smazat zprávu?",
-      "Zpráva bude odstraněna.",
-      [
-        {
-          text: "Zrušit",
-          style: "cancel",
-        },
-        {
-          text: "Smazat",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await api(`/messages/${message.id}`, {
-                method: "DELETE",
-              });
-
-              setMessages((old) =>
-                old.filter(
-                  (item) => item.id !== message.id
-                )
-              );
-            } catch (error) {
-              Alert.alert("Chyba", error.message);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  // --------------------------------------------------
-  // USERS
-  // --------------------------------------------------
+  // ==================================================
+  // VYHLEDÁVÁNÍ UŽIVATELŮ
+  // ==================================================
 
   const searchUsers = async (text) => {
     setSearchText(text);
@@ -377,68 +502,59 @@ export default function App() {
       );
 
       setUsers(data.users || []);
-    } catch {}
-  };
-
-  const openChatWithUser = async (user) => {
-    try {
-      setLoading(true);
-
-      const data = await api("/conversations/private", {
-        method: "POST",
-        body: JSON.stringify({
-          userId: user.id,
-        }),
-      });
-
-      const chat =
-        data.conversation ||
-        data.chat ||
-        data;
-
-      setSearchText("");
-      setUsers([]);
-
-      setCurrentChat(chat);
-      setMessages([]);
-      setScreen("chat");
-
-      await loadMessages(chat.id);
-      await loadConversations();
     } catch (error) {
-      Alert.alert("Chat", error.message);
-    } finally {
-      setLoading(false);
+      console.log(
+        "Hledání uživatelů:",
+        error
+      );
     }
   };
 
-  // --------------------------------------------------
-  // GROUPS
-  // --------------------------------------------------
+  // ==================================================
+  // SKUPINY
+  // ==================================================
 
-  const toggleUserSelection = (user) => {
-    setSelectedUsers((old) => {
-      const exists = old.some(
-        (item) => item.id === user.id
-      );
+  const toggleUserSelection = (
+    selectedUser
+  ) => {
+    setSelectedUsers((oldUsers) => {
+      const exists =
+        oldUsers.some(
+          (item) =>
+            String(item.id) ===
+            String(selectedUser.id)
+        );
 
       if (exists) {
-        return old.filter(
-          (item) => item.id !== user.id
+        return oldUsers.filter(
+          (item) =>
+            String(item.id) !==
+            String(selectedUser.id)
         );
       }
 
-      return [...old, user];
+      return [
+        ...oldUsers,
+        selectedUser,
+      ];
     });
   };
 
   const createGroup = async () => {
-    if (!groupName.trim()) {
-      Alert.alert("Skupina", "Napiš název skupiny.");
+    const name =
+      groupName.trim();
+
+    if (!name) {
+      Alert.alert(
+        "Skupina",
+        "Napiš název skupiny."
+      );
       return;
     }
 
-    if (selectedUsers.length === 0) {
+    if (
+      selectedUsers.length === 0
+    ) {
       Alert.alert(
         "Skupina",
         "Vyber alespoň jednoho člověka."
@@ -449,56 +565,77 @@ export default function App() {
     try {
       setLoading(true);
 
-      const data = await api("/groups", {
-        method: "POST",
-        body: JSON.stringify({
-          name: groupName.trim(),
-          memberIds: selectedUsers.map(
-            (user) => user.id
-          ),
-        }),
-      });
+      const data = await api(
+        "/groups",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            memberIds:
+              selectedUsers.map(
+                (item) => item.id
+              ),
+          }),
+        }
+      );
 
-      const chat =
-        data.conversation ||
-        data.group;
+      const group =
+        data.group ||
+        data.conversation;
+
+      if (!group) {
+        throw new Error(
+          "Server nevrátil vytvořenou skupinu."
+        );
+      }
+
+      const chat = {
+        id: group.id,
+        type: "group",
+        name:
+          group.name || name,
+        members:
+          group.members || [],
+      };
 
       setGroupName("");
       setSelectedUsers([]);
       setSearchText("");
       setUsers([]);
 
-      if (chat) {
-        setCurrentChat(chat);
-        setMessages([]);
-        setScreen("chat");
-
-        await loadMessages(chat.id);
-        await loadGroupInfo(chat.id);
-      }
+      setCurrentChat(chat);
+      setMessages([]);
+      setScreen("chat");
 
       await loadConversations();
+      await loadMessages(chat.id);
+      await loadGroupInfo(chat.id);
     } catch (error) {
-      Alert.alert("Skupina", error.message);
+      Alert.alert(
+        "Skupina",
+        error.message
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  // --------------------------------------------------
-  // GROUP INFO
-  // --------------------------------------------------
+  // ==================================================
+  // INFORMACE O SKUPINĚ
+  // ==================================================
 
   const loadGroupInfo = async (
-    conversationId,
+    groupId,
     silent = false
   ) => {
     try {
       const data = await api(
-        `/groups/${conversationId}`
+        `/groups/${groupId}`
       );
 
-      setGroupInfo(data.group || data);
+      setGroupInfo(
+        data.group || data
+      );
     } catch (error) {
       if (!silent) {
         Alert.alert(
@@ -509,14 +646,13 @@ export default function App() {
     }
   };
 
-  // --------------------------------------------------
-  // RENAME GROUP
-  // --------------------------------------------------
+  // ==================================================
+  // PŘEJMENOVÁNÍ SKUPINY
+  // ==================================================
 
   const renameGroup = async () => {
-    if (!currentChat) return;
-
-    const name = renameText.trim();
+    const name =
+      renameText.trim();
 
     if (!name) {
       Alert.alert(
@@ -525,6 +661,8 @@ export default function App() {
       );
       return;
     }
+
+    if (!currentChat) return;
 
     try {
       const data = await api(
@@ -559,7 +697,7 @@ export default function App() {
       setRenameVisible(false);
       setRenameText("");
 
-      await loadConversations();
+      loadConversations();
     } catch (error) {
       Alert.alert(
         "Přejmenování",
@@ -568,9 +706,69 @@ export default function App() {
     }
   };
 
-  // --------------------------------------------------
-  // AUTO REFRESH
-  // --------------------------------------------------
+  // ==================================================
+  // SMAZÁNÍ VLASTNÍ ZPRÁVY
+  // ==================================================
+
+  const deleteMessage = (
+    message
+  ) => {
+    const senderId =
+      message.senderId ??
+      message.sender_id ??
+      message.userId ??
+      message.user_id;
+
+    if (
+      !me ||
+      String(senderId) !==
+        String(me.id)
+    ) {
+      return;
+    }
+
+    Alert.alert(
+      "Smazat zprávu?",
+      "Zpráva bude odstraněna.",
+      [
+        {
+          text: "Zrušit",
+          style: "cancel",
+        },
+        {
+          text: "Smazat",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await api(
+                `/messages/${message.id}`,
+                {
+                  method: "DELETE",
+                }
+              );
+
+              setMessages((old) =>
+                old.filter(
+                  (item) =>
+                    String(item.id) !==
+                    String(message.id)
+                )
+              );
+            } catch (error) {
+              Alert.alert(
+                "Chyba",
+                error.message
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // ==================================================
+  // AUTOMATICKÉ OBNOVOVÁNÍ
+  // ==================================================
 
   useEffect(() => {
     if (
@@ -580,32 +778,37 @@ export default function App() {
       return;
     }
 
-    const interval = setInterval(() => {
-      loadMessages(
-        currentChat.id,
-        true
-      );
-
-      loadConversations();
-
-      if (currentChat.type === "group") {
-        loadGroupInfo(
+    const interval =
+      setInterval(() => {
+        loadMessages(
           currentChat.id,
           true
         );
-      }
-    }, 3000);
 
-    return () => clearInterval(interval);
+        if (
+          currentChat.type ===
+          "group"
+        ) {
+          loadGroupInfo(
+            currentChat.id,
+            true
+          );
+        }
+
+        loadConversations();
+      }, 3000);
+
+    return () =>
+      clearInterval(interval);
   }, [
     screen,
     currentChat?.id,
     currentChat?.type,
   ]);
 
-  // --------------------------------------------------
+  // ==================================================
   // WELCOME
-  // --------------------------------------------------
+  // ==================================================
 
   const renderWelcome = () => (
     <SafeAreaView style={styles.safe}>
@@ -615,12 +818,14 @@ export default function App() {
         </Text>
 
         <Text style={styles.subtitle}>
-          Messenger, kde může být i Rýp.
+          Messenger, kde může kecat i Rýp 😈
         </Text>
 
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={() => setScreen("login")}
+          onPress={() =>
+            setScreen("login")
+          }
         >
           <Text style={styles.buttonText}>
             Přihlásit se
@@ -629,7 +834,9 @@ export default function App() {
 
         <TouchableOpacity
           style={styles.secondaryButton}
-          onPress={() => setScreen("register")}
+          onPress={() =>
+            setScreen("register")
+          }
         >
           <Text style={styles.secondaryText}>
             Vytvořit účet
@@ -639,15 +846,17 @@ export default function App() {
     </SafeAreaView>
   );
 
-  // --------------------------------------------------
+  // ==================================================
   // LOGIN
-  // --------------------------------------------------
+  // ==================================================
 
   const renderLogin = () => (
     <SafeAreaView style={styles.safe}>
       <View style={styles.form}>
         <TouchableOpacity
-          onPress={() => setScreen("welcome")}
+          onPress={() =>
+            setScreen("welcome")
+          }
         >
           <Text style={styles.back}>
             ← Zpět
@@ -660,7 +869,7 @@ export default function App() {
 
         <TextInput
           style={styles.input}
-          placeholder="Email"
+          placeholder="E-mail"
           placeholderTextColor="#777"
           value={email}
           onChangeText={setEmail}
@@ -692,15 +901,17 @@ export default function App() {
     </SafeAreaView>
   );
 
-  // --------------------------------------------------
+  // ==================================================
   // REGISTER
-  // --------------------------------------------------
+  // ==================================================
 
   const renderRegister = () => (
     <SafeAreaView style={styles.safe}>
       <View style={styles.form}>
         <TouchableOpacity
-          onPress={() => setScreen("welcome")}
+          onPress={() =>
+            setScreen("welcome")
+          }
         >
           <Text style={styles.back}>
             ← Zpět
@@ -708,7 +919,7 @@ export default function App() {
         </TouchableOpacity>
 
         <Text style={styles.title}>
-          Registrace
+          Vytvoření účtu
         </Text>
 
         <TextInput
@@ -722,7 +933,7 @@ export default function App() {
 
         <TextInput
           style={styles.input}
-          placeholder="Email"
+          placeholder="E-mail"
           placeholderTextColor="#777"
           value={email}
           onChangeText={setEmail}
@@ -746,7 +957,7 @@ export default function App() {
         >
           <Text style={styles.buttonText}>
             {loading
-              ? "Vytvářím účet..."
+              ? "Vytvářím..."
               : "Registrovat"}
           </Text>
         </TouchableOpacity>
@@ -754,9 +965,9 @@ export default function App() {
     </SafeAreaView>
   );
 
-  // --------------------------------------------------
-  // CHATS
-  // --------------------------------------------------
+  // ==================================================
+  // SEZNAM CHATŮ
+  // ==================================================
 
   const renderChats = () => (
     <SafeAreaView style={styles.safe}>
@@ -767,11 +978,13 @@ export default function App() {
           </Text>
 
           <Text style={styles.headerUser}>
-            {me?.username || ""}
+            @{me?.username || ""}
           </Text>
         </View>
 
-        <TouchableOpacity onPress={logout}>
+        <TouchableOpacity
+          onPress={logout}
+        >
           <Text style={styles.headerAction}>
             Odhlásit
           </Text>
@@ -820,62 +1033,77 @@ export default function App() {
         }
         ListEmptyComponent={
           <Text style={styles.emptyText}>
-            Zatím tu nic není.
+            Zatím tu nejsou žádné chaty.
           </Text>
         }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.chatItem}
-            onPress={() => openChat(item)}
-          >
-            <View style={styles.chatAvatar}>
-              <Text style={styles.avatarText}>
-                {item.type === "group"
-                  ? "👥"
-                  : "👤"}
-              </Text>
-            </View>
+        renderItem={({ item }) => {
+          const isGroup =
+            item.type === "group";
 
-            <View style={styles.chatInfo}>
-              <Text style={styles.chatName}>
-                {item.name ||
-                  item.username ||
-                  "Chat"}
-              </Text>
+          const displayName =
+            isGroup
+              ? item.name ||
+                "Skupina"
+              : item.user?.username ||
+                item.username ||
+                "Uživatel";
 
-              {item.type === "group" ? (
-                <Text style={styles.chatStatus}>
-                  Skupina
+          return (
+            <TouchableOpacity
+              style={styles.chatItem}
+              onPress={() =>
+                openChat(item)
+              }
+            >
+              <View style={styles.chatAvatar}>
+                <Text style={styles.avatarText}>
+                  {isGroup
+                    ? "👥"
+                    : "👤"}
                 </Text>
-              ) : (
-                <Text
-                  style={[
-                    styles.chatStatus,
-                    item.online &&
-                      styles.onlineText,
-                  ]}
-                >
-                  {item.online
-                    ? "● online"
-                    : "● offline"}
+              </View>
+
+              <View style={styles.chatInfo}>
+                <Text style={styles.chatName}>
+                  {displayName}
                 </Text>
-              )}
-            </View>
-          </TouchableOpacity>
-        )}
+
+                {isGroup ? (
+                  <Text style={styles.chatStatus}>
+                    Skupina
+                  </Text>
+                ) : (
+                  <Text
+                    style={[
+                      styles.chatStatus,
+                      item.user?.online &&
+                        styles.onlineText,
+                    ]}
+                  >
+                    {item.user?.online
+                      ? "● online"
+                      : "● offline"}
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
+          );
+        }}
       />
     </SafeAreaView>
   );
 
-  // --------------------------------------------------
-  // NEW CHAT
-  // --------------------------------------------------
+  // ==================================================
+  // NOVÝ CHAT
+  // ==================================================
 
   const renderNewChat = () => (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => setScreen("chats")}
+          onPress={() =>
+            setScreen("chats")
+          }
         >
           <Text style={styles.headerAction}>
             ← Zpět
@@ -886,7 +1114,7 @@ export default function App() {
           Nový chat
         </Text>
 
-        <View style={{ width: 50 }} />
+        <View style={{ width: 45 }} />
       </View>
 
       <TextInput
@@ -896,6 +1124,7 @@ export default function App() {
         value={searchText}
         onChangeText={searchUsers}
         autoCapitalize="none"
+        autoFocus
       />
 
       <FlatList
@@ -906,7 +1135,7 @@ export default function App() {
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <Text style={styles.emptyText}>
-            Napiš alespoň 2 znaky.
+            Hledání začne po zadání alespoň 2 znaků.
           </Text>
         }
         renderItem={({ item }) => (
@@ -945,15 +1174,17 @@ export default function App() {
     </SafeAreaView>
   );
 
-  // --------------------------------------------------
-  // NEW GROUP
-  // --------------------------------------------------
+  // ==================================================
+  // NOVÁ SKUPINA
+  // ==================================================
 
   const renderNewGroup = () => (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => setScreen("chats")}
+          onPress={() =>
+            setScreen("chats")
+          }
         >
           <Text style={styles.headerAction}>
             ← Zpět
@@ -964,7 +1195,7 @@ export default function App() {
           Nová skupina
         </Text>
 
-        <View style={{ width: 50 }} />
+        <View style={{ width: 45 }} />
       </View>
 
       <View style={styles.groupForm}>
@@ -986,7 +1217,8 @@ export default function App() {
         />
 
         <Text style={styles.selectedText}>
-          Vybráno: {selectedUsers.length}
+          Vybráno:{" "}
+          {selectedUsers.length}
         </Text>
       </View>
 
@@ -999,7 +1231,9 @@ export default function App() {
         renderItem={({ item }) => {
           const selected =
             selectedUsers.some(
-              (user) => user.id === item.id
+              (user) =>
+                String(user.id) ===
+                String(item.id)
             );
 
           return (
@@ -1015,7 +1249,9 @@ export default function App() {
             >
               <View style={styles.chatAvatar}>
                 <Text style={styles.avatarText}>
-                  {selected ? "✓" : "👤"}
+                  {selected
+                    ? "✓"
+                    : "👤"}
                 </Text>
               </View>
 
@@ -1055,9 +1291,9 @@ export default function App() {
     </SafeAreaView>
   );
 
-  // --------------------------------------------------
+  // ==================================================
   // CHAT
-  // --------------------------------------------------
+  // ==================================================
 
   const renderChat = () => (
     <SafeAreaView style={styles.safe}>
@@ -1087,7 +1323,8 @@ export default function App() {
             style={styles.chatHeaderCenter}
             onPress={() => {
               if (
-                currentChat?.type === "group"
+                currentChat?.type ===
+                "group"
               ) {
                 setMembersVisible(true);
               }
@@ -1097,27 +1334,35 @@ export default function App() {
               style={styles.chatHeaderTitle}
               numberOfLines={1}
             >
-              {currentChat?.name ||
-                currentChat?.username ||
-                "Chat"}
+              {currentChat?.type ===
+              "group"
+                ? currentChat?.name ||
+                  groupInfo?.name ||
+                  "Skupina"
+                : currentChat?.user
+                    ?.username ||
+                  currentChat?.username ||
+                  "Chat"}
             </Text>
 
             {currentChat?.type ===
             "group" ? (
               <Text style={styles.chatHeaderSub}>
-                {groupInfo?.members?.length ||
-                  0}{" "}
+                {groupInfo?.members
+                  ?.length || 0}{" "}
                 členů
               </Text>
             ) : (
               <Text
                 style={[
                   styles.chatHeaderSub,
-                  currentChat?.online &&
+                  currentChat?.user
+                    ?.online &&
                     styles.onlineText,
                 ]}
               >
-                {currentChat?.online
+                {currentChat?.user
+                  ?.online
                   ? "● online"
                   : "● offline"}
               </Text>
@@ -1129,7 +1374,9 @@ export default function App() {
             <TouchableOpacity
               onPress={() => {
                 setRenameText(
-                  currentChat?.name || ""
+                  currentChat?.name ||
+                    groupInfo?.name ||
+                    ""
                 );
                 setRenameVisible(true);
               }}
@@ -1146,7 +1393,9 @@ export default function App() {
         <FlatList
           data={messages}
           keyExtractor={(item, index) =>
-            String(item.id || index)
+            String(
+              item.id || index
+            )
           }
           contentContainerStyle={styles.messages}
           keyboardShouldPersistTaps="handled"
@@ -1158,15 +1407,22 @@ export default function App() {
             )
           }
           renderItem={({ item }) => {
+            const senderId =
+              item.senderId ??
+              item.sender_id ??
+              item.userId ??
+              item.user_id;
+
             const isMine =
-              Number(item.user_id) ===
-              Number(me?.id);
+              String(senderId) ===
+              String(me?.id);
 
             const isRyp =
+              item.isRyp === true ||
               item.is_ryp === true ||
-              item.username === "Rýp" ||
-              item.email ===
-                "ryp@rypenger.ai";
+              item.senderUsername ===
+                "Rýp" ||
+              item.username === "Rýp";
 
             return (
               <TouchableOpacity
@@ -1203,7 +1459,8 @@ export default function App() {
                       >
                         {isRyp
                           ? "😈 Rýp"
-                          : item.username ||
+                          : item.senderUsername ||
+                            item.username ||
                             "Uživatel"}
                       </Text>
                     )}
@@ -1215,7 +1472,9 @@ export default function App() {
                         styles.myMessageText,
                     ]}
                   >
-                    {item.content}
+                    {item.content ||
+                      item.message ||
+                      ""}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -1244,7 +1503,7 @@ export default function App() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* MEMBERS */}
+      {/* ČLENOVÉ */}
       <Modal
         visible={membersVisible}
         transparent
@@ -1260,7 +1519,9 @@ export default function App() {
             </Text>
 
             <FlatList
-              data={groupInfo?.members || []}
+              data={
+                groupInfo?.members || []
+              }
               keyExtractor={(item) =>
                 String(item.id)
               }
@@ -1268,31 +1529,38 @@ export default function App() {
               renderItem={({ item }) => {
                 const isRyp =
                   item.isRyp ||
+                  item.is_ryp ||
                   item.username === "Rýp";
 
                 return (
-                  <View style={styles.memberItem}>
-                    <View>
-                      <Text
-                        style={styles.memberName}
-                      >
-                        {isRyp
-                          ? "😈 Rýp"
-                          : item.username}
-                      </Text>
+                  <View
+                    style={
+                      styles.memberItem
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.memberName
+                      }
+                    >
+                      {isRyp
+                        ? "😈 Rýp"
+                        : item.username}
+                    </Text>
 
-                      <Text
-                        style={[
-                          styles.memberStatus,
-                          item.online &&
-                            styles.onlineText,
-                        ]}
-                      >
-                        {item.online
-                          ? "● online"
-                          : "● offline"}
-                      </Text>
-                    </View>
+                    <Text
+                      style={[
+                        styles.memberStatus,
+                        (item.online ||
+                          isRyp) &&
+                          styles.onlineText,
+                      ]}
+                    >
+                      {isRyp ||
+                      item.online
+                        ? "● online"
+                        : "● offline"}
+                    </Text>
                   </View>
                 );
               }}
@@ -1312,7 +1580,7 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* RENAME */}
+      {/* PŘEJMENOVÁNÍ */}
       <Modal
         visible={renameVisible}
         transparent
@@ -1361,9 +1629,9 @@ export default function App() {
     </SafeAreaView>
   );
 
-  // --------------------------------------------------
-  // SCREEN ROUTER
-  // --------------------------------------------------
+  // ==================================================
+  // ROUTER
+  // ==================================================
 
   if (screen === "welcome") {
     return (
@@ -1448,9 +1716,9 @@ export default function App() {
   );
 }
 
-// --------------------------------------------------
+// ==================================================
 // STYLES
-// --------------------------------------------------
+// ==================================================
 
 const styles = StyleSheet.create({
   safe: {
@@ -1801,7 +2069,8 @@ const styles = StyleSheet.create({
 
   modalBackground: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.75)",
+    backgroundColor:
+      "rgba(0,0,0,0.75)",
     justifyContent: "flex-end",
   },
 
