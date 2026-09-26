@@ -13,7 +13,8 @@
 
     "android": {
       "package": "com.mara.rypenger",
-      "versionCode": 7
+      "versionCode": 8,
+      "googleServicesFile": "./google-services.json"
     },
 
     "extra": {
