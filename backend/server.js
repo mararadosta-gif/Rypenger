@@ -7,7 +7,9 @@ const { Pool } = require("pg");
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: "8mb" }));
+
+// Větší limit kvůli fotografiím.
+app.use(express.json({ limit: "20mb" }));
 
 const PORT = process.env.PORT || 3000;
 
@@ -258,6 +260,38 @@ function isOnline(lastSeen) {
 }
 
 // =========================
+// OBRÁZKY
+// =========================
+
+function isValidImageData(image) {
+  if (!image || typeof image !== "string") {
+    return false;
+  }
+
+  return /^data:image\/(jpeg|jpg|png|webp);base64,/i.test(
+    image
+  );
+}
+
+function imageSizeOk(image) {
+  if (!image || typeof image !== "string") {
+    return false;
+  }
+
+  // Přibližná kontrola velikosti Base64 dat.
+  // Limit je přibližně 10 MB na jeden obrázek.
+  const base64Part =
+    image.split(",")[1] || "";
+
+  const estimatedBytes =
+    Math.floor(
+      (base64Part.length * 3) / 4
+    );
+
+  return estimatedBytes <= 10 * 1024 * 1024;
+}
+
+// =========================
 // DATABASE
 // =========================
 
@@ -275,6 +309,13 @@ async function initDatabase() {
   await pool.query(`
     ALTER TABLE users
     ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP
+  `);
+
+  // NOVÉ:
+  // Profilová fotografie uživatele.
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS avatar TEXT
   `);
 
   await pool.query(`
@@ -375,6 +416,13 @@ async function initDatabase() {
     )
   `);
 
+  // NOVÉ:
+  // Obrázek připojený ke zprávě.
+  await pool.query(`
+    ALTER TABLE messages
+    ADD COLUMN IF NOT EXISTS image TEXT
+  `);
+
   await pool.query(`
     CREATE INDEX IF NOT EXISTS
     idx_conversation_members_user
@@ -469,7 +517,6 @@ async function authenticateToken(
       JWT_SECRET
     );
 
-    // Aktualizace aktivity uživatele.
     await pool.query(
       `
       UPDATE users
@@ -609,7 +656,8 @@ app.post(
           RETURNING
             id,
             username,
-            email
+            email,
+            avatar
           `,
           [
             cleanUsername,
@@ -645,7 +693,9 @@ app.post(
           username:
             user.username,
           email:
-            user.email
+            user.email,
+          avatar:
+            user.avatar || null
         }
       });
 
@@ -698,7 +748,8 @@ app.post(
             id,
             username,
             email,
-            password_hash
+            password_hash,
+            avatar
           FROM users
           WHERE email = $1
           `,
@@ -763,7 +814,9 @@ app.post(
           username:
             user.username,
           email:
-            user.email
+            user.email,
+          avatar:
+            user.avatar || null
         }
       });
 
@@ -797,7 +850,8 @@ app.get(
             id,
             username,
             email,
-            last_seen
+            last_seen,
+            avatar
           FROM users
           WHERE id = $1
           `,
@@ -826,6 +880,8 @@ app.get(
             user.email,
           lastSeen:
             user.last_seen,
+          avatar:
+            user.avatar || null,
           online:
             true
         }
@@ -840,6 +896,92 @@ app.get(
       res.status(500).json({
         error:
           "Chyba serveru."
+      });
+    }
+  }
+);
+
+// =========================
+// NASTAVENÍ PROFILOVÉ FOTKY
+// =========================
+
+app.patch(
+  "/me/avatar",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const avatar =
+        req.body.avatar || null;
+
+      if (avatar !== null) {
+        if (!isValidImageData(avatar)) {
+          return res.status(400).json({
+            error:
+              "Neplatný formát profilové fotografie."
+          });
+        }
+
+        if (!imageSizeOk(avatar)) {
+          return res.status(400).json({
+            error:
+              "Profilová fotografie je příliš velká. Maximum je 10 MB."
+          });
+        }
+      }
+
+      const result =
+        await pool.query(
+          `
+          UPDATE users
+          SET avatar = $1
+          WHERE id = $2
+          RETURNING
+            id,
+            username,
+            email,
+            avatar
+          `,
+          [
+            avatar,
+            req.user.id
+          ]
+        );
+
+      if (
+        result.rows.length === 0
+      ) {
+        return res.status(404).json({
+          error:
+            "Uživatel nebyl nalezen."
+        });
+      }
+
+      const user =
+        result.rows[0];
+
+      res.json({
+        success: true,
+        user: {
+          id:
+            user.id.toString(),
+          username:
+            user.username,
+          email:
+            user.email,
+          avatar:
+            user.avatar || null
+        }
+      });
+
+    } catch (error) {
+      console.error(
+        "AVATAR UPDATE ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Profilovou fotografii se nepodařilo uložit."
       });
     }
   }
@@ -873,7 +1015,8 @@ app.get(
             id,
             username,
             email,
-            last_seen
+            last_seen,
+            avatar
           FROM users
           WHERE id != $1
           AND email != $2
@@ -903,6 +1046,8 @@ app.get(
                 user.username,
               email:
                 user.email,
+              avatar:
+                user.avatar || null,
               lastSeen:
                 user.last_seen,
               online:
@@ -965,7 +1110,8 @@ app.post(
             id,
             username,
             email,
-            last_seen
+            last_seen,
+            avatar
           FROM users
           WHERE id = $1
           AND email != $2
@@ -1077,6 +1223,9 @@ app.post(
             email:
               otherUser.rows[0]
                 .email,
+            avatar:
+              otherUser.rows[0]
+                .avatar || null,
             lastSeen:
               otherUser.rows[0]
                 .last_seen,
@@ -1177,7 +1326,8 @@ app.post(
             id,
             username,
             email,
-            last_seen
+            last_seen,
+            avatar
           FROM users
           WHERE id = ANY(
             $1::bigint[]
@@ -1196,7 +1346,6 @@ app.post(
         });
       }
 
-      // Rýp
       const rypResult =
         await pool.query(
           `
@@ -1259,7 +1408,6 @@ app.post(
         );
       }
 
-      // Rýp je automaticky členem každé nové skupiny.
       if (rypId) {
         await client.query(
           `
@@ -1289,7 +1437,8 @@ app.post(
             u.id,
             u.username,
             u.email,
-            u.last_seen
+            u.last_seen,
+            u.avatar
           FROM conversation_members cm
 
           JOIN users u
@@ -1321,6 +1470,8 @@ app.post(
               member.username,
             email:
               member.email,
+            avatar:
+              member.avatar || null,
             lastSeen:
               member.last_seen,
             online:
@@ -1346,8 +1497,6 @@ app.post(
           members
         },
 
-        // Zachováme i starý název
-        // pro kompatibilitu.
         conversation: {
           id:
             conversation.id
@@ -1428,7 +1577,18 @@ app.get(
                   ELSE u1.last_seen
                 END
               ELSE NULL
-            END AS other_last_seen
+            END AS other_last_seen,
+
+            CASE
+              WHEN c.type = 'private'
+              THEN
+                CASE
+                  WHEN c.user_one = $1
+                  THEN u2.avatar
+                  ELSE u1.avatar
+                END
+              ELSE NULL
+            END AS other_avatar
 
           FROM conversations c
 
@@ -1473,6 +1633,10 @@ app.get(
 
                       username:
                         chat.other_username,
+
+                      avatar:
+                        chat.other_avatar ||
+                        null,
 
                       lastSeen:
                         chat.other_last_seen,
@@ -1554,7 +1718,8 @@ app.get(
             u.id,
             u.username,
             u.email,
-            u.last_seen
+            u.last_seen,
+            u.avatar
 
           FROM conversation_members cm
 
@@ -1599,6 +1764,9 @@ app.get(
 
                 email:
                   user.email,
+
+                avatar:
+                  user.avatar || null,
 
                 lastSeen:
                   user.last_seen,
@@ -1910,15 +2078,17 @@ Použij tyto informace pouze jako zdroj pro odpověď.
         (
           conversation_id,
           sender_id,
-          message
+          message,
+          image
         )
         VALUES
-        ($1, $2, $3)
+        ($1, $2, $3, NULL)
 
         RETURNING
           id,
           sender_id,
           message,
+          image,
           created_at
         `,
         [
@@ -1945,6 +2115,9 @@ Použij tyto informace pouze jako zdroj pro odpověď.
       message:
         message.message,
 
+      image:
+        null,
+
       createdAt:
         message.created_at
     };
@@ -1960,7 +2133,7 @@ Použij tyto informace pouze jako zdroj pro odpověď.
 }
 
 // =========================
-// ODESLÁNÍ ZPRÁVY
+// ODESLÁNÍ TEXTU / FOTKY
 // =========================
 
 app.post(
@@ -1979,11 +2152,32 @@ app.post(
           ""
         ).trim();
 
-      if (!message) {
+      const image =
+        req.body.image || null;
+
+      // Musí být buď text, nebo obrázek.
+      if (!message && !image) {
         return res.status(400).json({
           error:
             "Zpráva nesmí být prázdná."
         });
+      }
+
+      // Kontrola obrázku.
+      if (image) {
+        if (!isValidImageData(image)) {
+          return res.status(400).json({
+            error:
+              "Neplatný formát obrázku."
+          });
+        }
+
+        if (!imageSizeOk(image)) {
+          return res.status(400).json({
+            error:
+              "Obrázek je příliš velký. Maximum je 10 MB."
+          });
+        }
       }
 
       const access =
@@ -2023,21 +2217,24 @@ app.post(
           (
             conversation_id,
             sender_id,
-            message
+            message,
+            image
           )
           VALUES
-          ($1, $2, $3)
+          ($1, $2, $3, $4)
 
           RETURNING
             id,
             sender_id,
             message,
+            image,
             created_at
           `,
           [
             conversationId,
             req.user.id,
-            message
+            message,
+            image
           ]
         );
 
@@ -2058,13 +2255,20 @@ app.post(
         message:
           newMessage.message,
 
+        image:
+          newMessage.image ||
+          null,
+
         createdAt:
           newMessage.created_at
       };
 
       let rypMessage = null;
 
+      // Rýp reaguje pouze na textovou zprávu
+      // ve skupině, která ho oslovuje.
       if (
+        message &&
         access.rows[0].type ===
           "group" &&
         mentionsRyp(message)
@@ -2146,6 +2350,7 @@ app.get(
             m.id,
             m.sender_id,
             m.message,
+            m.image,
             m.created_at,
             u.username AS sender_username
 
@@ -2180,6 +2385,10 @@ app.get(
 
               message:
                 msg.message,
+
+              image:
+                msg.image ||
+                null,
 
               createdAt:
                 msg.created_at
