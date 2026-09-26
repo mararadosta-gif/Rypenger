@@ -36,9 +36,19 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// ==================================================
+// PUSH NOTIFIKACE
+// ==================================================
+
 async function registerForPushNotifications(authToken) {
   try {
-    if (!authToken) return;
+    if (!authToken) {
+      Alert.alert(
+        "Push chyba",
+        "Chybí přihlašovací token."
+      );
+      return;
+    }
 
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync(
@@ -58,21 +68,24 @@ async function registerForPushNotifications(authToken) {
       );
     }
 
-    const { status: existingStatus } =
+    const permission =
       await Notifications.getPermissionsAsync();
 
-    let finalStatus = existingStatus;
+    let finalStatus =
+      permission.status;
 
-    if (existingStatus !== "granted") {
-      const { status } =
+    if (finalStatus !== "granted") {
+      const requested =
         await Notifications.requestPermissionsAsync();
 
-      finalStatus = status;
+      finalStatus =
+        requested.status;
     }
 
     if (finalStatus !== "granted") {
-      console.log(
-        "Notifikace nejsou povolené."
+      Alert.alert(
+        "Push notifikace",
+        `Povolení notifikací nebylo uděleno.\n\nStav: ${finalStatus}`
       );
       return;
     }
@@ -83,46 +96,126 @@ async function registerForPushNotifications(authToken) {
       Constants?.easConfig?.projectId;
 
     if (!projectId) {
-      console.log(
-        "EAS projectId nebylo nalezeno."
+      Alert.alert(
+        "Push chyba",
+        "Aplikace nemá nalezené EAS project ID."
       );
       return;
     }
 
-    const expoPushToken =
-      (
-        await Notifications.getExpoPushTokenAsync(
-          {
-            projectId,
-          }
-        )
-      ).data;
-
-    if (!expoPushToken) return;
-
-    await fetch(
-      `${API_URL}/me/push-token`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type":
-            "application/json",
-          Authorization:
-            `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({
-          pushToken: expoPushToken,
-        }),
-      }
+    console.log(
+      "📱 EAS project ID:",
+      projectId
     );
+
+    let expoPushToken;
+
+    try {
+      expoPushToken =
+        (
+          await Notifications.getExpoPushTokenAsync(
+            {
+              projectId,
+            }
+          )
+        ).data;
+    } catch (error) {
+      console.log(
+        "GET EXPO PUSH TOKEN ERROR:",
+        error
+      );
+
+      Alert.alert(
+        "Push chyba",
+        `Nepodařilo se získat Expo push token.\n\n${
+          error?.message ||
+          String(error)
+        }`
+      );
+
+      return;
+    }
+
+    if (!expoPushToken) {
+      Alert.alert(
+        "Push chyba",
+        "Expo nevrátilo žádný push token."
+      );
+      return;
+    }
 
     console.log(
-      "Push token uložen."
+      "📱 Expo push token získán:",
+      expoPushToken
     );
+
+    let response;
+
+    try {
+      response = await fetch(
+        `${API_URL}/me/push-token`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type":
+              "application/json",
+            Authorization:
+              `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            pushToken:
+              expoPushToken,
+          }),
+        }
+      );
+    } catch (error) {
+      console.log(
+        "PUSH TOKEN SERVER ERROR:",
+        error
+      );
+
+      Alert.alert(
+        "Push chyba",
+        `Nepodařilo se spojit se serverem.\n\n${
+          error?.message ||
+          String(error)
+        }`
+      );
+
+      return;
+    }
+
+    const responseText =
+      await response.text();
+
+    console.log(
+      "📡 Push token server:",
+      response.status,
+      responseText
+    );
+
+    if (!response.ok) {
+      Alert.alert(
+        "Push chyba",
+        `Server odmítl push token.\n\nHTTP ${response.status}\n${responseText}`
+      );
+      return;
+    }
+
+    console.log(
+      "✅ Push token uložen."
+    );
+
   } catch (error) {
     console.log(
-      "Registrace push notifikací:",
+      "REGISTRACE PUSH ERROR:",
       error
+    );
+
+    Alert.alert(
+      "Push chyba",
+      error?.message ||
+        String(error)
     );
   }
 }
@@ -135,37 +228,46 @@ function AppContent() {
 
   const [token, setToken] =
     useState(null);
+
   const [me, setMe] =
     useState(null);
 
   const [username, setUsername] =
     useState("");
+
   const [email, setEmail] =
     useState("");
+
   const [password, setPassword] =
     useState("");
 
   const [loading, setLoading] =
     useState(false);
+
   const [messagesLoading, setMessagesLoading] =
     useState(false);
 
   const [conversations, setConversations] =
     useState([]);
+
   const [currentChat, setCurrentChat] =
     useState(null);
+
   const [messages, setMessages] =
     useState([]);
+
   const [messageText, setMessageText] =
     useState("");
 
   const [searchText, setSearchText] =
     useState("");
+
   const [users, setUsers] =
     useState([]);
 
   const [groupName, setGroupName] =
     useState("");
+
   const [selectedUsers, setSelectedUsers] =
     useState([]);
 
@@ -174,18 +276,22 @@ function AppContent() {
 
   const [membersVisible, setMembersVisible] =
     useState(false);
+
   const [renameVisible, setRenameVisible] =
     useState(false);
+
   const [renameText, setRenameText] =
     useState("");
 
   const [profileVisible, setProfileVisible] =
     useState(false);
+
   const [imageSending, setImageSending] =
     useState(false);
 
   // ==================================================
-  // PUSH NOTIFIKACE
+  // PUSH REGISTRACE
+  // Automatické přihlášení ZŮSTÁVÁ
   // ==================================================
 
   useEffect(() => {
@@ -288,6 +394,7 @@ function AppContent() {
         await AsyncStorage.removeItem(
           TOKEN_KEY
         );
+
         setScreen("welcome");
         return;
       }
@@ -304,6 +411,7 @@ function AppContent() {
         "Kontrola přihlášení:",
         error
       );
+
       setScreen("welcome");
     }
   };
@@ -343,7 +451,8 @@ function AppContent() {
           body: JSON.stringify({
             username:
               username.trim(),
-            email: email.trim(),
+            email:
+              email.trim(),
             password,
           }),
         }
@@ -400,7 +509,8 @@ function AppContent() {
         {
           method: "POST",
           body: JSON.stringify({
-            email: email.trim(),
+            email:
+              email.trim(),
             password,
           }),
         }
@@ -1396,7 +1506,7 @@ function AppContent() {
   ]);
 
   // ==================================================
-  // AVATAR COMPONENT
+  // AVATAR
   // ==================================================
 
   const renderAvatar = (
