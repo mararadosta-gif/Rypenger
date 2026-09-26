@@ -5,6 +5,7 @@
     "version": "1.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "icon": "./IMG-20260926-WA0009.jpg",
     "android": {
       "package": "com.mara.rypenger",
       "versionCode": 5
