@@ -39,11 +39,9 @@ export default function App() {
   const [messageText, setMessageText] = useState("");
   const [messagesLoading, setMessagesLoading] = useState(false);
 
-  // SKUPINA
   const [groupName, setGroupName] = useState("");
   const [selectedUsers, setSelectedUsers] = useState([]);
 
-  // AUTOMATICKÉ PŘIHLÁŠENÍ
   useEffect(() => {
     checkSavedLogin();
   }, []);
@@ -79,7 +77,6 @@ export default function App() {
     }
   };
 
-  // REGISTRACE
   const register = async () => {
     if (!username || !email || !password) {
       Alert.alert("Chyba", "Vyplň všechna pole.");
@@ -132,7 +129,6 @@ export default function App() {
     }
   };
 
-  // PŘIHLÁŠENÍ
   const login = async () => {
     if (!email || !password) {
       Alert.alert("Chyba", "Zadej e-mail a heslo.");
@@ -181,7 +177,6 @@ export default function App() {
     }
   };
 
-  // NAČTENÍ CHATŮ
   const loadConversations = async (savedToken = null) => {
     try {
       const token =
@@ -209,7 +204,6 @@ export default function App() {
     }
   };
 
-  // VYHLEDÁNÍ UŽIVATELŮ
   const searchUsers = async (text) => {
     setSearch(text);
 
@@ -248,7 +242,6 @@ export default function App() {
     }
   };
 
-  // OTEVŘENÍ / VYTVOŘENÍ 1:1 CHATU
   const openChatWithUser = async (selectedUser) => {
     try {
       const token = await AsyncStorage.getItem(TOKEN_KEY);
@@ -299,7 +292,6 @@ export default function App() {
     }
   };
 
-  // OTEVŘENÍ EXISTUJÍCÍHO CHATU
   const openExistingChat = (chat) => {
     setCurrentChat(chat);
     setMessages([]);
@@ -307,11 +299,11 @@ export default function App() {
     loadMessages(chat.id);
   };
 
-  // VÝBĚR UŽIVATELE DO SKUPINY
   const toggleUserSelection = (selectedUser) => {
     setSelectedUsers((oldUsers) => {
       const exists = oldUsers.some(
-        (item) => String(item.id) === String(selectedUser.id)
+        (item) =>
+          String(item.id) === String(selectedUser.id)
       );
 
       if (exists) {
@@ -325,7 +317,6 @@ export default function App() {
     });
   };
 
-  // VYTVOŘENÍ SKUPINY
   const createGroup = async () => {
     const name = groupName.trim();
 
@@ -355,7 +346,9 @@ export default function App() {
         },
         body: JSON.stringify({
           name,
-          memberIds: selectedUsers.map((item) => item.id),
+          memberIds: selectedUsers.map(
+            (item) => item.id
+          ),
         }),
       });
 
@@ -364,7 +357,8 @@ export default function App() {
       if (!response.ok) {
         Alert.alert(
           "Chyba",
-          data.error || "Skupinu se nepodařilo vytvořit."
+          data.error ||
+            "Skupinu se nepodařilo vytvořit."
         );
         return;
       }
@@ -398,7 +392,6 @@ export default function App() {
     }
   };
 
-  // NAČTENÍ ZPRÁV
   const loadMessages = async (conversationId) => {
     setMessagesLoading(true);
 
@@ -426,7 +419,6 @@ export default function App() {
     }
   };
 
-  // ODESLÁNÍ ZPRÁVY
   const sendMessage = async () => {
     const text = messageText.trim();
 
@@ -454,14 +446,19 @@ export default function App() {
       if (!response.ok) {
         Alert.alert(
           "Chyba",
-          data.error || "Zprávu se nepodařilo odeslat."
+          data.error ||
+            "Zprávu se nepodařilo odeslat."
         );
         return;
       }
 
+      // Uživatelova zpráva + případná okamžitá odpověď Rýpa
       setMessages((oldMessages) => [
         ...oldMessages,
         data.message,
+        ...(data.rypMessage
+          ? [data.rypMessage]
+          : []),
       ]);
 
       setMessageText("");
@@ -473,7 +470,6 @@ export default function App() {
     }
   };
 
-  // ODHLÁŠENÍ
   const logout = async () => {
     await AsyncStorage.removeItem(TOKEN_KEY);
 
@@ -488,14 +484,15 @@ export default function App() {
     setScreen("welcome");
   };
 
-  // NAČÍTÁNÍ
   if (checkingLogin) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" />
 
         <View style={styles.center}>
-          <Text style={styles.logo}>RYPENGER</Text>
+          <Text style={styles.logo}>
+            RYPENGER
+          </Text>
 
           <Text style={styles.loadingText}>
             Přihlašuji...
@@ -509,10 +506,11 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* WELCOME */}
       {screen === "welcome" && (
         <View style={styles.center}>
-          <Text style={styles.logo}>RYPENGER</Text>
+          <Text style={styles.logo}>
+            RYPENGER
+          </Text>
 
           <Text style={styles.subtitle}>
             Messenger, kde může kecat i Rýp 😏
@@ -538,7 +536,6 @@ export default function App() {
         </View>
       )}
 
-      {/* LOGIN */}
       {screen === "login" && (
         <View style={styles.form}>
           <Text style={styles.title}>
@@ -570,7 +567,9 @@ export default function App() {
             disabled={loading}
           >
             <Text style={styles.buttonText}>
-              {loading ? "Přihlašuji..." : "Přihlásit"}
+              {loading
+                ? "Přihlašuji..."
+                : "Přihlásit"}
             </Text>
           </TouchableOpacity>
 
@@ -584,7 +583,6 @@ export default function App() {
         </View>
       )}
 
-      {/* REGISTER */}
       {screen === "register" && (
         <View style={styles.form}>
           <Text style={styles.title}>
@@ -641,7 +639,6 @@ export default function App() {
         </View>
       )}
 
-      {/* CHAT LIST */}
       {screen === "chats" && (
         <View style={styles.chats}>
           <View style={styles.header}>
@@ -719,7 +716,8 @@ export default function App() {
 
                 const displayName = isGroup
                   ? item.name || "Skupina"
-                  : item.user?.username || "Uživatel";
+                  : item.user?.username ||
+                    "Uživatel";
 
                 const firstLetter =
                   displayName
@@ -740,18 +738,28 @@ export default function App() {
                           styles.groupAvatar,
                       ]}
                     >
-                      <Text style={styles.avatarText}>
-                        {isGroup ? "👥" : firstLetter}
+                      <Text
+                        style={styles.avatarText}
+                      >
+                        {isGroup
+                          ? "👥"
+                          : firstLetter}
                       </Text>
                     </View>
 
-                    <View style={styles.chatItemInfo}>
-                      <Text style={styles.chatName}>
+                    <View
+                      style={styles.chatItemInfo}
+                    >
+                      <Text
+                        style={styles.chatName}
+                      >
                         {displayName}
                       </Text>
 
                       {isGroup && (
-                        <Text style={styles.groupLabel}>
+                        <Text
+                          style={styles.groupLabel}
+                        >
                           Skupina
                         </Text>
                       )}
@@ -770,7 +778,6 @@ export default function App() {
         </View>
       )}
 
-      {/* NOVÝ CHAT */}
       {screen === "newChat" && (
         <View style={styles.chats}>
           <View style={styles.topRow}>
@@ -850,7 +857,6 @@ export default function App() {
         </View>
       )}
 
-      {/* NOVÁ SKUPINA */}
       {screen === "newGroup" && (
         <View style={styles.chats}>
           <View style={styles.topRow}>
@@ -894,7 +900,8 @@ export default function App() {
           {selectedUsers.length > 0 && (
             <View style={styles.selectedBox}>
               <Text style={styles.selectedTitle}>
-                Vybraní členové: {selectedUsers.length}
+                Vybraní členové:{" "}
+                {selectedUsers.length}
               </Text>
 
               <FlatList
@@ -903,18 +910,32 @@ export default function App() {
                 keyExtractor={(item) =>
                   String(item.id)
                 }
-                showsHorizontalScrollIndicator={false}
+                showsHorizontalScrollIndicator={
+                  false
+                }
                 renderItem={({ item }) => (
-                  <View style={styles.selectedUser}>
-                    <View style={styles.smallAvatar}>
-                      <Text style={styles.smallAvatarText}>
+                  <View
+                    style={styles.selectedUser}
+                  >
+                    <View
+                      style={styles.smallAvatar}
+                    >
+                      <Text
+                        style={
+                          styles.smallAvatarText
+                        }
+                      >
                         {item.username
                           .charAt(0)
                           .toUpperCase()}
                       </Text>
                     </View>
 
-                    <Text style={styles.selectedUserName}>
+                    <Text
+                      style={
+                        styles.selectedUserName
+                      }
+                    >
                       {item.username}
                     </Text>
                   </View>
@@ -962,19 +983,27 @@ export default function App() {
                   }
                 >
                   <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>
+                    <Text
+                      style={styles.avatarText}
+                    >
                       {item.username
                         .charAt(0)
                         .toUpperCase()}
                     </Text>
                   </View>
 
-                  <View style={styles.userInfoFlex}>
-                    <Text style={styles.userName}>
+                  <View
+                    style={styles.userInfoFlex}
+                  >
+                    <Text
+                      style={styles.userName}
+                    >
                       {item.username}
                     </Text>
 
-                    <Text style={styles.userEmail}>
+                    <Text
+                      style={styles.userEmail}
+                    >
                       {item.email}
                     </Text>
                   </View>
@@ -986,7 +1015,9 @@ export default function App() {
                         styles.checkCircleSelected,
                     ]}
                   >
-                    <Text style={styles.checkText}>
+                    <Text
+                      style={styles.checkText}
+                    >
                       {selected ? "✓" : "+"}
                     </Text>
                   </View>
@@ -1016,7 +1047,6 @@ export default function App() {
         </View>
       )}
 
-      {/* CHAT */}
       {screen === "chat" && currentChat && (
         <KeyboardAvoidingView
           style={styles.chatScreen}
@@ -1040,8 +1070,14 @@ export default function App() {
               </Text>
             </TouchableOpacity>
 
-            <View style={styles.chatHeaderAvatar}>
-              <Text style={styles.chatHeaderAvatarText}>
+            <View
+              style={styles.chatHeaderAvatar}
+            >
+              <Text
+                style={
+                  styles.chatHeaderAvatarText
+                }
+              >
                 {currentChat.type === "group"
                   ? "👥"
                   : currentChat.user?.username
@@ -1050,14 +1086,22 @@ export default function App() {
               </Text>
             </View>
 
-            <View style={styles.chatHeaderInfo}>
-              <Text style={styles.chatHeaderName}>
+            <View
+              style={styles.chatHeaderInfo}
+            >
+              <Text
+                style={styles.chatHeaderName}
+              >
                 {currentChat.type === "group"
-                  ? currentChat.name || "Skupina"
-                  : currentChat.user?.username || "Chat"}
+                  ? currentChat.name ||
+                    "Skupina"
+                  : currentChat.user?.username ||
+                    "Chat"}
               </Text>
 
-              <Text style={styles.chatHeaderStatus}>
+              <Text
+                style={styles.chatHeaderStatus}
+              >
                 {currentChat.type === "group"
                   ? "skupinový chat"
                   : "online chat"}
@@ -1108,10 +1152,15 @@ export default function App() {
                           : styles.otherBubble,
                       ]}
                     >
-                      {currentChat.type === "group" &&
+                      {currentChat.type ===
+                        "group" &&
                         !mine &&
                         item.senderUsername && (
-                          <Text style={styles.senderName}>
+                          <Text
+                            style={
+                              styles.senderName
+                            }
+                          >
                             {item.senderUsername}
                           </Text>
                         )}
@@ -1131,7 +1180,9 @@ export default function App() {
                 );
               }}
               ListEmptyComponent={
-                <Text style={styles.emptyChatText}>
+                <Text
+                  style={styles.emptyChatText}
+                >
                   Zatím tu není žádná zpráva.
                   {"\n"}
                   Napiš něco 😏
@@ -1140,7 +1191,9 @@ export default function App() {
             />
           )}
 
-          <View style={styles.messageInputRow}>
+          <View
+            style={styles.messageInputRow}
+          >
             <TextInput
               style={styles.messageInput}
               placeholder="Napiš zprávu..."
