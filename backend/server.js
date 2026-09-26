@@ -300,10 +300,18 @@ async function sendPushNotifications(
   body
 ) {
   try {
+    console.log("=================================");
+    console.log("🔔 PUSH START");
+    console.log("conversationId:", conversationId);
+    console.log("senderId:", senderId);
+    console.log("title:", title);
+    console.log("body:", body);
+
     const result = await pool.query(
       `
       SELECT
         u.id,
+        u.username,
         u.push_token
       FROM conversation_members cm
 
@@ -321,10 +329,27 @@ async function sendPushNotifications(
       ]
     );
 
+    console.log(
+      "👥 Členové s push tokenem:",
+      result.rows.length
+    );
+
+    if (result.rows.length > 0) {
+      console.log(
+        "📱 Tokeny:",
+        result.rows.map(row => ({
+          id: row.id,
+          username: row.username,
+          token: row.push_token
+        }))
+      );
+    }
+
     const tokens =
       result.rows
         .map(row => ({
           id: row.id,
+          username: row.username,
           token: row.push_token
         }))
         .filter(item =>
@@ -332,7 +357,16 @@ async function sendPushNotifications(
             .test(item.token)
         );
 
+    console.log(
+      "✅ Platné Expo tokeny:",
+      tokens.length
+    );
+
     if (tokens.length === 0) {
+      console.log(
+        "❌ ŽÁDNÝ PLATNÝ PUSH TOKEN – PUSH SE NEODESLAL"
+      );
+      console.log("=================================");
       return;
     }
 
@@ -343,11 +377,16 @@ async function sendPushNotifications(
         channelId: "default",
         title,
         body,
+        priority: "high",
         data: {
           conversationId:
             conversationId.toString()
         }
       }));
+
+    console.log(
+      "🚀 Odesílám na Expo Push API..."
+    );
 
     const response = await fetch(
       "https://exp.host/--/api/v2/push/send",
@@ -365,11 +404,30 @@ async function sendPushNotifications(
     const data =
       await response.json();
 
+    console.log(
+      "📨 Expo HTTP status:",
+      response.status
+    );
+
+    console.log(
+      "📨 Expo odpověď:",
+      JSON.stringify(
+        data,
+        null,
+        2
+      )
+    );
+
     if (!response.ok) {
       console.error(
-        "EXPO PUSH ERROR:",
+        "❌ EXPO PUSH ERROR:",
         data
       );
+
+      console.log(
+        "================================="
+      );
+
       return;
     }
 
@@ -382,11 +440,25 @@ async function sendPushNotifications(
         const ticket =
           data.data[i];
 
+        console.log(
+          `🎫 Push ticket ${i}:`,
+          JSON.stringify(
+            ticket,
+            null,
+            2
+          )
+        );
+
         if (
           ticket?.status === "error" &&
           ticket?.details?.error ===
             "DeviceNotRegistered"
         ) {
+          console.log(
+            "⚠️ Zařízení není registrované – mažu push token:",
+            tokens[i].username
+          );
+
           await pool.query(
             `
             UPDATE users
@@ -399,10 +471,22 @@ async function sendPushNotifications(
       }
     }
 
+    console.log(
+      "✅ PUSH DOKONČEN"
+    );
+
+    console.log(
+      "================================="
+    );
+
   } catch (error) {
     console.error(
-      "PUSH NOTIFICATION ERROR:",
+      "❌ PUSH NOTIFICATION ERROR:",
       error
+    );
+
+    console.log(
+      "================================="
     );
   }
 }
@@ -1060,6 +1144,11 @@ app.patch(
           pushToken,
           req.user.id
         ]
+      );
+
+      console.log(
+        "📱 PUSH TOKEN ULOŽEN PRO USER ID:",
+        req.user.id
       );
 
       res.json({
