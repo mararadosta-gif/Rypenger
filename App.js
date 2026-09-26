@@ -21,66 +21,213 @@ import {
 } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
+import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 
 const API_URL = "https://rypenger.onrender.com";
 const TOKEN_KEY = "@rypenger_token";
 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+async function registerForPushNotifications(authToken) {
+  try {
+    if (!authToken) return;
+
+    if (Platform.OS === "android") {
+      await Notifications.setNotificationChannelAsync(
+        "default",
+        {
+          name: "Rypenger",
+          importance:
+            Notifications.AndroidImportance.MAX,
+          vibrationPattern: [
+            0,
+            250,
+            250,
+            250,
+          ],
+          sound: "default",
+        }
+      );
+    }
+
+    const { status: existingStatus } =
+      await Notifications.getPermissionsAsync();
+
+    let finalStatus = existingStatus;
+
+    if (existingStatus !== "granted") {
+      const { status } =
+        await Notifications.requestPermissionsAsync();
+
+      finalStatus = status;
+    }
+
+    if (finalStatus !== "granted") {
+      console.log(
+        "Notifikace nejsou povolené."
+      );
+      return;
+    }
+
+    const projectId =
+      Constants?.expoConfig?.extra?.eas
+        ?.projectId ||
+      Constants?.easConfig?.projectId;
+
+    if (!projectId) {
+      console.log(
+        "EAS projectId nebylo nalezeno."
+      );
+      return;
+    }
+
+    const expoPushToken =
+      (
+        await Notifications.getExpoPushTokenAsync(
+          {
+            projectId,
+          }
+        )
+      ).data;
+
+    if (!expoPushToken) return;
+
+    await fetch(
+      `${API_URL}/me/push-token`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type":
+            "application/json",
+          Authorization:
+            `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          pushToken: expoPushToken,
+        }),
+      }
+    );
+
+    console.log(
+      "Push token uložen."
+    );
+  } catch (error) {
+    console.log(
+      "Registrace push notifikací:",
+      error
+    );
+  }
+}
+
 function AppContent() {
   const insets = useSafeAreaInsets();
 
-  const [screen, setScreen] = useState("welcome");
+  const [screen, setScreen] =
+    useState("welcome");
 
-  const [token, setToken] = useState(null);
-  const [me, setMe] = useState(null);
+  const [token, setToken] =
+    useState(null);
+  const [me, setMe] =
+    useState(null);
 
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [username, setUsername] =
+    useState("");
+  const [email, setEmail] =
+    useState("");
+  const [password, setPassword] =
+    useState("");
 
-  const [loading, setLoading] = useState(false);
-  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [loading, setLoading] =
+    useState(false);
+  const [messagesLoading, setMessagesLoading] =
+    useState(false);
 
-  const [conversations, setConversations] = useState([]);
-  const [currentChat, setCurrentChat] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [messageText, setMessageText] = useState("");
+  const [conversations, setConversations] =
+    useState([]);
+  const [currentChat, setCurrentChat] =
+    useState(null);
+  const [messages, setMessages] =
+    useState([]);
+  const [messageText, setMessageText] =
+    useState("");
 
-  const [searchText, setSearchText] = useState("");
-  const [users, setUsers] = useState([]);
+  const [searchText, setSearchText] =
+    useState("");
+  const [users, setUsers] =
+    useState([]);
 
-  const [groupName, setGroupName] = useState("");
-  const [selectedUsers, setSelectedUsers] = useState([]);
+  const [groupName, setGroupName] =
+    useState("");
+  const [selectedUsers, setSelectedUsers] =
+    useState([]);
 
-  const [groupInfo, setGroupInfo] = useState(null);
+  const [groupInfo, setGroupInfo] =
+    useState(null);
 
-  const [membersVisible, setMembersVisible] = useState(false);
-  const [renameVisible, setRenameVisible] = useState(false);
-  const [renameText, setRenameText] = useState("");
+  const [membersVisible, setMembersVisible] =
+    useState(false);
+  const [renameVisible, setRenameVisible] =
+    useState(false);
+  const [renameText, setRenameText] =
+    useState("");
 
-  const [profileVisible, setProfileVisible] = useState(false);
-  const [imageSending, setImageSending] = useState(false);
+  const [profileVisible, setProfileVisible] =
+    useState(false);
+  const [imageSending, setImageSending] =
+    useState(false);
+
+  // ==================================================
+  // PUSH NOTIFIKACE
+  // ==================================================
+
+  useEffect(() => {
+    if (token) {
+      registerForPushNotifications(
+        token
+      );
+    }
+  }, [token]);
 
   // ==================================================
   // API
   // ==================================================
 
-  const api = async (path, options = {}) => {
+  const api = async (
+    path,
+    options = {}
+  ) => {
     const savedToken =
-      token || (await AsyncStorage.getItem(TOKEN_KEY));
+      token ||
+      (await AsyncStorage.getItem(
+        TOKEN_KEY
+      ));
 
     const headers = {
-      "Content-Type": "application/json",
+      "Content-Type":
+        "application/json",
       ...(options.headers || {}),
     };
 
     if (savedToken) {
-      headers.Authorization = `Bearer ${savedToken}`;
+      headers.Authorization =
+        `Bearer ${savedToken}`;
     }
 
-    const response = await fetch(`${API_URL}${path}`, {
-      ...options,
-      headers,
-    });
+    const response = await fetch(
+      `${API_URL}${path}`,
+      {
+        ...options,
+        headers,
+      }
+    );
 
     let data = {};
 
@@ -92,7 +239,8 @@ function AppContent() {
 
     if (!response.ok) {
       throw new Error(
-        data.error || "Něco se pokazilo."
+        data.error ||
+          "Něco se pokazilo."
       );
     }
 
@@ -110,26 +258,36 @@ function AppContent() {
   const checkLogin = async () => {
     try {
       const savedToken =
-        await AsyncStorage.getItem(TOKEN_KEY);
+        await AsyncStorage.getItem(
+          TOKEN_KEY
+        );
 
       if (!savedToken) {
         setScreen("welcome");
         return;
       }
 
-      const response = await fetch(
-        `${API_URL}/me`,
-        {
-          headers: {
-            Authorization: `Bearer ${savedToken}`,
-          },
-        }
-      );
+      const response =
+        await fetch(
+          `${API_URL}/me`,
+          {
+            headers: {
+              Authorization:
+                `Bearer ${savedToken}`,
+            },
+          }
+        );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
-      if (!response.ok || !data.user) {
-        await AsyncStorage.removeItem(TOKEN_KEY);
+      if (
+        !response.ok ||
+        !data.user
+      ) {
+        await AsyncStorage.removeItem(
+          TOKEN_KEY
+        );
         setScreen("welcome");
         return;
       }
@@ -138,7 +296,9 @@ function AppContent() {
       setMe(data.user);
       setScreen("chats");
 
-      loadConversations(savedToken);
+      loadConversations(
+        savedToken
+      );
     } catch (error) {
       console.log(
         "Kontrola přihlášení:",
@@ -176,14 +336,18 @@ function AppContent() {
     try {
       setLoading(true);
 
-      const data = await api("/register", {
-        method: "POST",
-        body: JSON.stringify({
-          username: username.trim(),
-          email: email.trim(),
-          password,
-        }),
-      });
+      const data = await api(
+        "/register",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            username:
+              username.trim(),
+            email: email.trim(),
+            password,
+          }),
+        }
+      );
 
       await AsyncStorage.setItem(
         TOKEN_KEY,
@@ -199,7 +363,9 @@ function AppContent() {
 
       setScreen("chats");
 
-      loadConversations(data.token);
+      loadConversations(
+        data.token
+      );
     } catch (error) {
       Alert.alert(
         "Registrace",
@@ -215,7 +381,10 @@ function AppContent() {
   // ==================================================
 
   const login = async () => {
-    if (!email.trim() || !password) {
+    if (
+      !email.trim() ||
+      !password
+    ) {
       Alert.alert(
         "Přihlášení",
         "Vyplň email a heslo."
@@ -226,13 +395,16 @@ function AppContent() {
     try {
       setLoading(true);
 
-      const data = await api("/login", {
-        method: "POST",
-        body: JSON.stringify({
-          email: email.trim(),
-          password,
-        }),
-      });
+      const data = await api(
+        "/login",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            email: email.trim(),
+            password,
+          }),
+        }
+      );
 
       await AsyncStorage.setItem(
         TOKEN_KEY,
@@ -247,7 +419,9 @@ function AppContent() {
 
       setScreen("chats");
 
-      loadConversations(data.token);
+      loadConversations(
+        data.token
+      );
     } catch (error) {
       Alert.alert(
         "Přihlášení",
@@ -263,7 +437,9 @@ function AppContent() {
   // ==================================================
 
   const logout = async () => {
-    await AsyncStorage.removeItem(TOKEN_KEY);
+    await AsyncStorage.removeItem(
+      TOKEN_KEY
+    );
 
     setToken(null);
     setMe(null);
@@ -303,21 +479,32 @@ function AppContent() {
         return;
       }
 
-      const result = useCamera
-        ? await ImagePicker.launchCameraAsync({
-            mediaTypes: ["images"],
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.7,
-            base64: true,
-          })
-        : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ["images"],
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.7,
-            base64: true,
-          });
+      const result =
+        useCamera
+          ? await ImagePicker.launchCameraAsync(
+              {
+                mediaTypes: [
+                  "images",
+                ],
+                allowsEditing:
+                  true,
+                aspect: [1, 1],
+                quality: 0.7,
+                base64: true,
+              }
+            )
+          : await ImagePicker.launchImageLibraryAsync(
+              {
+                mediaTypes: [
+                  "images",
+                ],
+                allowsEditing:
+                  true,
+                aspect: [1, 1],
+                quality: 0.7,
+                base64: true,
+              }
+            );
 
       if (
         result.canceled ||
@@ -346,15 +533,16 @@ function AppContent() {
 
       setLoading(true);
 
-      const data = await api(
-        "/me/avatar",
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            avatar,
-          }),
-        }
-      );
+      const data =
+        await api(
+          "/me/avatar",
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              avatar,
+            }),
+          }
+        );
 
       if (data.user) {
         setMe(data.user);
@@ -378,15 +566,16 @@ function AppContent() {
     try {
       setLoading(true);
 
-      const data = await api(
-        "/me/avatar",
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            avatar: null,
-          }),
-        }
-      );
+      const data =
+        await api(
+          "/me/avatar",
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              avatar: null,
+            }),
+          }
+        );
 
       if (data.user) {
         setMe(data.user);
@@ -425,8 +614,10 @@ function AppContent() {
           ? [
               {
                 text: "Odstranit",
-                style: "destructive",
-                onPress: removeAvatar,
+                style:
+                  "destructive",
+                onPress:
+                  removeAvatar,
               },
             ]
           : []),
@@ -442,42 +633,47 @@ function AppContent() {
   // CHATY
   // ==================================================
 
-  const loadConversations = async (
-    customToken = null
-  ) => {
-    try {
-      const savedToken =
-        customToken ||
-        token ||
-        (await AsyncStorage.getItem(TOKEN_KEY));
+  const loadConversations =
+    async (
+      customToken = null
+    ) => {
+      try {
+        const savedToken =
+          customToken ||
+          token ||
+          (await AsyncStorage.getItem(
+            TOKEN_KEY
+          ));
 
-      if (!savedToken) return;
+        if (!savedToken) return;
 
-      const response = await fetch(
-        `${API_URL}/conversations`,
-        {
-          headers: {
-            Authorization:
-              `Bearer ${savedToken}`,
-          },
+        const response =
+          await fetch(
+            `${API_URL}/conversations`,
+            {
+              headers: {
+                Authorization:
+                  `Bearer ${savedToken}`,
+              },
+            }
+          );
+
+        const data =
+          await response.json();
+
+        if (response.ok) {
+          setConversations(
+            data.conversations ||
+              []
+          );
         }
-      );
-
-      const data =
-        await response.json();
-
-      if (response.ok) {
-        setConversations(
-          data.conversations || []
+      } catch (error) {
+        console.log(
+          "Načítání chatů:",
+          error
         );
       }
-    } catch (error) {
-      console.log(
-        "Načítání chatů:",
-        error
-      );
-    }
-  };
+    };
 
   // ==================================================
   // OTEVŘENÍ CHATU
@@ -491,10 +687,16 @@ function AppContent() {
     setGroupInfo(null);
     setScreen("chat");
 
-    await loadMessages(chat.id);
+    await loadMessages(
+      chat.id
+    );
 
-    if (chat.type === "group") {
-      await loadGroupInfo(chat.id);
+    if (
+      chat.type === "group"
+    ) {
+      await loadGroupInfo(
+        chat.id
+      );
     }
   };
 
@@ -502,97 +704,104 @@ function AppContent() {
   // NOVÝ 1:1 CHAT
   // ==================================================
 
-  const openChatWithUser = async (
-    selectedUser
-  ) => {
-    try {
-      setLoading(true);
+  const openChatWithUser =
+    async (
+      selectedUser
+    ) => {
+      try {
+        setLoading(true);
 
-      const data = await api(
-        "/conversations",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            userId:
-              selectedUser.id,
-          }),
+        const data =
+          await api(
+            "/conversations",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                userId:
+                  selectedUser.id,
+              }),
+            }
+          );
+
+        const conversation =
+          data.conversation;
+
+        if (!conversation) {
+          throw new Error(
+            "Server nevrátil vytvořený chat."
+          );
         }
-      );
 
-      const conversation =
-        data.conversation;
+        const chat = {
+          id: conversation.id,
+          type: "private",
+          user:
+            conversation.user ||
+            selectedUser,
+        };
 
-      if (!conversation) {
-        throw new Error(
-          "Server nevrátil vytvořený chat."
+        setSearchText("");
+        setUsers([]);
+
+        setCurrentChat(chat);
+        setMessages([]);
+        setGroupInfo(null);
+        setScreen("chat");
+
+        await loadMessages(
+          chat.id
         );
+
+        await loadConversations();
+      } catch (error) {
+        Alert.alert(
+          "Nový chat",
+          error.message
+        );
+      } finally {
+        setLoading(false);
       }
-
-      const chat = {
-        id: conversation.id,
-        type: "private",
-        user:
-          conversation.user ||
-          selectedUser,
-      };
-
-      setSearchText("");
-      setUsers([]);
-
-      setCurrentChat(chat);
-      setMessages([]);
-      setGroupInfo(null);
-      setScreen("chat");
-
-      await loadMessages(
-        chat.id
-      );
-
-      await loadConversations();
-    } catch (error) {
-      Alert.alert(
-        "Nový chat",
-        error.message
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
   // ==================================================
   // ZPRÁVY
   // ==================================================
 
-  const loadMessages = async (
-    conversationId,
-    silent = false
-  ) => {
-    try {
-      if (!silent) {
-        setMessagesLoading(true);
-      }
+  const loadMessages =
+    async (
+      conversationId,
+      silent = false
+    ) => {
+      try {
+        if (!silent) {
+          setMessagesLoading(
+            true
+          );
+        }
 
-      const data =
-        await api(
-          `/conversations/${conversationId}/messages`
-        );
+        const data =
+          await api(
+            `/conversations/${conversationId}/messages`
+          );
 
-      setMessages(
-        data.messages || []
-      );
-    } catch (error) {
-      if (!silent) {
-        Alert.alert(
-          "Zprávy",
-          error.message
+        setMessages(
+          data.messages || []
         );
+      } catch (error) {
+        if (!silent) {
+          Alert.alert(
+            "Zprávy",
+            error.message
+          );
+        }
+      } finally {
+        if (!silent) {
+          setMessagesLoading(
+            false
+          );
+        }
       }
-    } finally {
-      if (!silent) {
-        setMessagesLoading(false);
-      }
-    }
-  };
+    };
 
   // ==================================================
   // ODESLÁNÍ TEXTU
@@ -642,53 +851,54 @@ function AppContent() {
   // SPOLEČNÉ PŘIDÁNÍ ZPRÁV
   // ==================================================
 
-  const addReturnedMessages = (
-    data
-  ) => {
-    setMessages(
-      (oldMessages) => {
-        const newMessages = [
-          ...oldMessages,
-        ];
+  const addReturnedMessages =
+    (data) => {
+      setMessages(
+        (oldMessages) => {
+          const newMessages = [
+            ...oldMessages,
+          ];
 
-        if (data.message) {
-          const exists =
-            newMessages.some(
-              (item) =>
-                String(item.id) ===
-                String(
-                  data.message.id
-                )
-            );
+          if (data.message) {
+            const exists =
+              newMessages.some(
+                (item) =>
+                  String(item.id) ===
+                  String(
+                    data.message.id
+                  )
+              );
 
-          if (!exists) {
-            newMessages.push(
-              data.message
-            );
+            if (!exists) {
+              newMessages.push(
+                data.message
+              );
+            }
           }
-        }
 
-        if (data.rypMessage) {
-          const exists =
-            newMessages.some(
-              (item) =>
-                String(item.id) ===
-                String(
-                  data.rypMessage.id
-                )
-            );
+          if (
+            data.rypMessage
+          ) {
+            const exists =
+              newMessages.some(
+                (item) =>
+                  String(item.id) ===
+                  String(
+                    data.rypMessage.id
+                  )
+              );
 
-          if (!exists) {
-            newMessages.push(
-              data.rypMessage
-            );
+            if (!exists) {
+              newMessages.push(
+                data.rypMessage
+              );
+            }
           }
-        }
 
-        return newMessages;
-      }
-    );
-  };
+          return newMessages;
+        }
+      );
+    };
 
   // ==================================================
   // POSLÁNÍ FOTKY
@@ -724,19 +934,30 @@ function AppContent() {
 
       Keyboard.dismiss();
 
-      const result = useCamera
-        ? await ImagePicker.launchCameraAsync({
-            mediaTypes: ["images"],
-            allowsEditing: true,
-            quality: 0.7,
-            base64: true,
-          })
-        : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ["images"],
-            allowsEditing: true,
-            quality: 0.7,
-            base64: true,
-          });
+      const result =
+        useCamera
+          ? await ImagePicker.launchCameraAsync(
+              {
+                mediaTypes: [
+                  "images",
+                ],
+                allowsEditing:
+                  true,
+                quality: 0.7,
+                base64: true,
+              }
+            )
+          : await ImagePicker.launchImageLibraryAsync(
+              {
+                mediaTypes: [
+                  "images",
+                ],
+                allowsEditing:
+                  true,
+                quality: 0.7,
+                base64: true,
+              }
+            );
 
       if (
         result.canceled ||
@@ -792,28 +1013,29 @@ function AppContent() {
     }
   };
 
-  const showPhotoOptions = () => {
-    Alert.alert(
-      "Poslat fotku",
-      "Odkud ji chceš vybrat?",
-      [
-        {
-          text: "📷 Foťák",
-          onPress: () =>
-            sendPhoto(true),
-        },
-        {
-          text: "🖼️ Galerie",
-          onPress: () =>
-            sendPhoto(false),
-        },
-        {
-          text: "Zrušit",
-          style: "cancel",
-        },
-      ]
-    );
-  };
+  const showPhotoOptions =
+    () => {
+      Alert.alert(
+        "Poslat fotku",
+        "Odkud ji chceš vybrat?",
+        [
+          {
+            text: "📷 Foťák",
+            onPress: () =>
+              sendPhoto(true),
+          },
+          {
+            text: "🖼️ Galerie",
+            onPress: () =>
+              sendPhoto(false),
+          },
+          {
+            text: "Zrušit",
+            style: "cancel",
+          },
+        ]
+      );
+    };
 
   // ==================================================
   // VYHLEDÁVÁNÍ
@@ -854,282 +1076,284 @@ function AppContent() {
   // SKUPINY
   // ==================================================
 
-  const toggleUserSelection = (
-    selectedUser
-  ) => {
-    setSelectedUsers(
-      (oldUsers) => {
-        const exists =
-          oldUsers.some(
-            (item) =>
-              String(item.id) ===
-              String(
-                selectedUser.id
-              )
+  const toggleUserSelection =
+    (selectedUser) => {
+      setSelectedUsers(
+        (oldUsers) => {
+          const exists =
+            oldUsers.some(
+              (item) =>
+                String(item.id) ===
+                String(
+                  selectedUser.id
+                )
+            );
+
+          if (exists) {
+            return oldUsers.filter(
+              (item) =>
+                String(item.id) !==
+                String(
+                  selectedUser.id
+                )
+            );
+          }
+
+          return [
+            ...oldUsers,
+            selectedUser,
+          ];
+        }
+      );
+    };
+
+  const createGroup =
+    async () => {
+      const name =
+        groupName.trim();
+
+      if (!name) {
+        Alert.alert(
+          "Skupina",
+          "Napiš název skupiny."
+        );
+        return;
+      }
+
+      if (
+        selectedUsers.length ===
+        0
+      ) {
+        Alert.alert(
+          "Skupina",
+          "Vyber alespoň jednoho člověka."
+        );
+        return;
+      }
+
+      try {
+        setLoading(true);
+
+        const data =
+          await api(
+            "/groups",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                name,
+                memberIds:
+                  selectedUsers.map(
+                    (item) =>
+                      item.id
+                  ),
+              }),
+            }
           );
 
-        if (exists) {
-          return oldUsers.filter(
-            (item) =>
-              String(item.id) !==
-              String(
-                selectedUser.id
-              )
+        const group =
+          data.group ||
+          data.conversation;
+
+        if (!group) {
+          throw new Error(
+            "Server nevrátil vytvořenou skupinu."
           );
         }
 
-        return [
-          ...oldUsers,
-          selectedUser,
-        ];
-      }
-    );
-  };
+        const chat = {
+          id: group.id,
+          type: "group",
+          name:
+            group.name ||
+            name,
+          members:
+            group.members || [],
+        };
 
-  const createGroup = async () => {
-    const name =
-      groupName.trim();
+        setGroupName("");
+        setSelectedUsers([]);
+        setSearchText("");
+        setUsers([]);
 
-    if (!name) {
-      Alert.alert(
-        "Skupina",
-        "Napiš název skupiny."
-      );
-      return;
-    }
+        setCurrentChat(chat);
+        setMessages([]);
+        setScreen("chat");
 
-    if (
-      selectedUsers.length === 0
-    ) {
-      Alert.alert(
-        "Skupina",
-        "Vyber alespoň jednoho člověka."
-      );
-      return;
-    }
-
-    try {
-      setLoading(true);
-
-      const data =
-        await api(
-          "/groups",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              name,
-              memberIds:
-                selectedUsers.map(
-                  (item) =>
-                    item.id
-                ),
-            }),
-          }
+        await loadConversations();
+        await loadMessages(
+          chat.id
         );
-
-      const group =
-        data.group ||
-        data.conversation;
-
-      if (!group) {
-        throw new Error(
-          "Server nevrátil vytvořenou skupinu."
+        await loadGroupInfo(
+          chat.id
         );
+      } catch (error) {
+        Alert.alert(
+          "Skupina",
+          error.message
+        );
+      } finally {
+        setLoading(false);
       }
-
-      const chat = {
-        id: group.id,
-        type: "group",
-        name:
-          group.name ||
-          name,
-        members:
-          group.members || [],
-      };
-
-      setGroupName("");
-      setSelectedUsers([]);
-      setSearchText("");
-      setUsers([]);
-
-      setCurrentChat(chat);
-      setMessages([]);
-      setScreen("chat");
-
-      await loadConversations();
-      await loadMessages(
-        chat.id
-      );
-      await loadGroupInfo(
-        chat.id
-      );
-    } catch (error) {
-      Alert.alert(
-        "Skupina",
-        error.message
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
   // ==================================================
   // INFO SKUPINY
   // ==================================================
 
-  const loadGroupInfo = async (
-    groupId,
-    silent = false
-  ) => {
-    try {
-      const data =
-        await api(
-          `/groups/${groupId}`
-        );
+  const loadGroupInfo =
+    async (
+      groupId,
+      silent = false
+    ) => {
+      try {
+        const data =
+          await api(
+            `/groups/${groupId}`
+          );
 
-      setGroupInfo(
-        data.group || data
-      );
-    } catch (error) {
-      if (!silent) {
-        Alert.alert(
-          "Skupina",
-          error.message
+        setGroupInfo(
+          data.group || data
         );
+      } catch (error) {
+        if (!silent) {
+          Alert.alert(
+            "Skupina",
+            error.message
+          );
+        }
       }
-    }
-  };
+    };
 
   // ==================================================
   // PŘEJMENOVÁNÍ
   // ==================================================
 
-  const renameGroup = async () => {
-    const name =
-      renameText.trim();
+  const renameGroup =
+    async () => {
+      const name =
+        renameText.trim();
 
-    if (!name) {
-      Alert.alert(
-        "Skupina",
-        "Název nemůže být prázdný."
-      );
-      return;
-    }
+      if (!name) {
+        Alert.alert(
+          "Skupina",
+          "Název nemůže být prázdný."
+        );
+        return;
+      }
 
-    if (!currentChat) return;
+      if (!currentChat) return;
 
-    try {
-      const data =
-        await api(
-          `/groups/${currentChat.id}`,
-          {
-            method: "PATCH",
-            body: JSON.stringify({
-              name,
-            }),
-          }
+      try {
+        const data =
+          await api(
+            `/groups/${currentChat.id}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({
+                name,
+              }),
+            }
+          );
+
+        const newName =
+          data.group?.name ||
+          data.name ||
+          name;
+
+        setCurrentChat(
+          (old) => ({
+            ...old,
+            name: newName,
+          })
         );
 
-      const newName =
-        data.group?.name ||
-        data.name ||
-        name;
+        setGroupInfo(
+          (old) =>
+            old
+              ? {
+                  ...old,
+                  name: newName,
+                }
+              : old
+        );
 
-      setCurrentChat(
-        (old) => ({
-          ...old,
-          name: newName,
-        })
-      );
+        setRenameVisible(false);
+        setRenameText("");
 
-      setGroupInfo(
-        (old) =>
-          old
-            ? {
-                ...old,
-                name: newName,
-              }
-            : old
-      );
-
-      setRenameVisible(false);
-      setRenameText("");
-
-      loadConversations();
-    } catch (error) {
-      Alert.alert(
-        "Přejmenování",
-        error.message
-      );
-    }
-  };
+        loadConversations();
+      } catch (error) {
+        Alert.alert(
+          "Přejmenování",
+          error.message
+        );
+      }
+    };
 
   // ==================================================
   // SMAZÁNÍ ZPRÁVY
   // ==================================================
 
-  const deleteMessage = (
-    message
-  ) => {
-    const senderId =
-      message.senderId ??
-      message.sender_id ??
-      message.userId ??
-      message.user_id;
+  const deleteMessage =
+    (message) => {
+      const senderId =
+        message.senderId ??
+        message.sender_id ??
+        message.userId ??
+        message.user_id;
 
-    if (
-      !me ||
-      String(senderId) !==
-        String(me.id)
-    ) {
-      return;
-    }
+      if (
+        !me ||
+        String(senderId) !==
+          String(me.id)
+      ) {
+        return;
+      }
 
-    Alert.alert(
-      "Smazat zprávu?",
-      "Zpráva bude odstraněna.",
-      [
-        {
-          text: "Zrušit",
-          style: "cancel",
-        },
-        {
-          text: "Smazat",
-          style: "destructive",
-          onPress:
-            async () => {
-              try {
-                await api(
-                  `/messages/${message.id}`,
-                  {
-                    method:
-                      "DELETE",
-                  }
-                );
+      Alert.alert(
+        "Smazat zprávu?",
+        "Zpráva bude odstraněna.",
+        [
+          {
+            text: "Zrušit",
+            style: "cancel",
+          },
+          {
+            text: "Smazat",
+            style: "destructive",
+            onPress:
+              async () => {
+                try {
+                  await api(
+                    `/messages/${message.id}`,
+                    {
+                      method:
+                        "DELETE",
+                    }
+                  );
 
-                setMessages(
-                  (old) =>
-                    old.filter(
-                      (item) =>
-                        String(
-                          item.id
-                        ) !==
-                        String(
-                          message.id
-                        )
-                    )
-                );
-              } catch (error) {
-                Alert.alert(
-                  "Chyba",
-                  error.message
-                );
-              }
-            },
-        },
-      ]
-    );
-  };
+                  setMessages(
+                    (old) =>
+                      old.filter(
+                        (item) =>
+                          String(
+                            item.id
+                          ) !==
+                          String(
+                            message.id
+                          )
+                      )
+                  );
+                } catch (error) {
+                  Alert.alert(
+                    "Chyba",
+                    error.message
+                  );
+                }
+              },
+          },
+        ]
+      );
+    };
 
   // ==================================================
   // AUTO OBNOVOVÁNÍ
@@ -1238,7 +1462,9 @@ function AppContent() {
         </Text>
 
         <TouchableOpacity
-          style={styles.primaryButton}
+          style={
+            styles.primaryButton
+          }
           onPress={() =>
             setScreen("login")
           }
@@ -1259,7 +1485,9 @@ function AppContent() {
           }
         >
           <Text
-            style={styles.secondaryText}
+            style={
+              styles.secondaryText
+            }
           >
             Vytvořit účet
           </Text>
@@ -1311,12 +1539,16 @@ function AppContent() {
         />
 
         <TouchableOpacity
-          style={styles.primaryButton}
+          style={
+            styles.primaryButton
+          }
           onPress={login}
           disabled={loading}
         >
           <Text
-            style={styles.buttonText}
+            style={
+              styles.buttonText
+            }
           >
             {loading
               ? "Přihlašuji..."
@@ -1418,7 +1650,9 @@ function AppContent() {
     >
       <View style={styles.header}>
         <TouchableOpacity
-          style={styles.headerProfile}
+          style={
+            styles.headerProfile
+          }
           onPress={() =>
             setProfileVisible(true)
           }
@@ -1605,7 +1839,6 @@ function AppContent() {
         }}
       />
 
-      {/* PROFIL */}
       <Modal
         visible={profileVisible}
         transparent
@@ -2357,7 +2590,6 @@ function AppContent() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* ČLENOVÉ */}
       <Modal
         visible={membersVisible}
         transparent
@@ -2478,7 +2710,6 @@ function AppContent() {
         </View>
       </Modal>
 
-      {/* PŘEJMENOVÁNÍ */}
       <Modal
         visible={renameVisible}
         transparent
@@ -2563,9 +2794,7 @@ function AppContent() {
   // ROUTER
   // ==================================================
 
-  if (
-    screen === "welcome"
-  ) {
+  if (screen === "welcome") {
     return (
       <>
         <StatusBar
@@ -2577,9 +2806,7 @@ function AppContent() {
     );
   }
 
-  if (
-    screen === "login"
-  ) {
+  if (screen === "login") {
     return (
       <>
         <StatusBar
@@ -2591,9 +2818,7 @@ function AppContent() {
     );
   }
 
-  if (
-    screen === "register"
-  ) {
+  if (screen === "register") {
     return (
       <>
         <StatusBar
@@ -2605,9 +2830,7 @@ function AppContent() {
     );
   }
 
-  if (
-    screen === "newChat"
-  ) {
+  if (screen === "newChat") {
     return (
       <>
         <StatusBar
@@ -2619,9 +2842,7 @@ function AppContent() {
     );
   }
 
-  if (
-    screen === "newGroup"
-  ) {
+  if (screen === "newGroup") {
     return (
       <>
         <StatusBar
@@ -2633,9 +2854,7 @@ function AppContent() {
     );
   }
 
-  if (
-    screen === "chat"
-  ) {
+  if (screen === "chat") {
     return (
       <>
         <StatusBar
