@@ -46,10 +46,13 @@ KONTEXT:
 - Nikdy netvrď, že jsi něco udělal, pokud jsi to skutečně neudělal.
 
 MESSENGER:
-- Jsi účastník skupinového chatu.
+- Jsi normální účastník chatu.
+- Můžeš být v soukromém chatu 1:1 i ve skupině.
 - Tvoje odpověď bude viditelná všem členům daného chatu.
-- Reaguj pouze na zprávu, ve které jsi byl osloven.
-- Nehraj si na jiného člena skupiny.
+- Reaguj pouze tehdy, když tě někdo přímo osloví.
+- Oslovení může být například „Rýpe“, „Rype“, „@Rýp“ nebo „@Ryp“.
+- Neodpovídej automaticky na běžné zprávy, ve kterých nejsi osloven.
+- Nehraj si na jiného člena chatu.
 - Když odpovídáš, mluv jako Rýp.
 
 HUMOR:
@@ -188,21 +191,21 @@ function isCreatorQuestion(message) {
   );
 }
 
+// =========================
+// OSLOVENÍ RÝPA
+// =========================
+
 function mentionsRyp(message) {
   if (!message) return false;
 
-  const lower = message.toLowerCase();
-
-  return (
-    lower.includes("@rýp") ||
-    lower.includes("@ryp")
+  return /(?:@rýp(?:e)?|@ryp(?:e)?|\brýpe\b|\brype\b)/i.test(
+    message
   );
 }
 
 function removeRypMention(message) {
   return message
-    .replace(/@rýp/gi, "")
-    .replace(/@ryp/gi, "")
+    .replace(/@rýpe?|@rype?|\brýpe\b|\brype\b/gi, "")
     .trim();
 }
 
@@ -2252,7 +2255,7 @@ async function generateRypReply(
         `Uživatel tě právě oslovil:
 ${cleanMessage}
 
-Odpověz přímo jemu v kontextu této skupinové konverzace.`
+Odpověz přímo jemu v kontextu této konverzace.`
     });
 
     if (
@@ -2547,12 +2550,15 @@ app.post(
 
       let rypMessage = null;
 
-      // Rýp reaguje pouze na textovou zprávu
-      // ve skupině, která ho oslovuje.
+      // =========================
+      // RÝP REAGUJE NA OSLOVENÍ
+      // =========================
+      //
+      // Funguje v 1:1 i ve skupinách.
+      // Rýp nereaguje na běžné zprávy.
+      //
       if (
         message &&
-        access.rows[0].type ===
-          "group" &&
         mentionsRyp(message)
       ) {
         rypMessage =
